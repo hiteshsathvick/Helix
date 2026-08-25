@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
+  type AccessTokenResponse,
   login as apiLogin,
   logout as apiLogout,
   refresh as apiRefresh,
@@ -16,6 +17,10 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  // Endpoints like switch-org and accept-invitation return a fresh
+  // AccessTokenResponse reflecting a new active org; this applies it to the
+  // in-memory session without a full login round-trip.
+  applySession: (response: AccessTokenResponse) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -59,9 +64,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const applySession = useCallback((response: AccessTokenResponse) => {
+    setAccessToken(response.access_token);
+    setUser(response.user);
+  }, []);
+
   const value = useMemo(
-    () => ({ user, accessToken, initializing, login, register, logout }),
-    [user, accessToken, initializing, login, register, logout]
+    () => ({ user, accessToken, initializing, login, register, logout, applySession }),
+    [user, accessToken, initializing, login, register, logout, applySession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

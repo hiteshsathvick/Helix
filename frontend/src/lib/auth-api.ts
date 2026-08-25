@@ -4,6 +4,7 @@ export type User = {
   id: string;
   email: string;
   is_active: boolean;
+  active_org_id: string | null;
   created_at: string;
 };
 

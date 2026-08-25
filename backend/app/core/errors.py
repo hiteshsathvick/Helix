@@ -45,6 +45,11 @@ class UnauthorizedError(HelixError):
     status_code = status.HTTP_401_UNAUTHORIZED
 
 
+class ForbiddenError(HelixError):
+    code = "forbidden"
+    status_code = status.HTTP_403_FORBIDDEN
+
+
 class RateLimitedError(HelixError):
     code = "rate_limited"
     status_code = status.HTTP_429_TOO_MANY_REQUESTS

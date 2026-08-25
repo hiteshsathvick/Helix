@@ -24,7 +24,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user_id: uuid.UUID) -> str:
+def create_access_token(user_id: uuid.UUID, org_id: uuid.UUID | None = None) -> str:
     settings = get_settings()
     now = datetime.now(UTC)
     payload: dict[str, Any] = {
@@ -33,6 +33,8 @@ def create_access_token(user_id: uuid.UUID) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=settings.jwt_access_token_ttl_minutes),
     }
+    if org_id is not None:
+        payload["org_id"] = str(org_id)
     key = settings.jwt_signing_keys[settings.jwt_active_kid]
     return jwt.encode(payload, key, algorithm="HS256", headers={"kid": settings.jwt_active_kid})
 
@@ -48,13 +50,13 @@ def decode_access_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, key, algorithms=["HS256"])
 
 
-def generate_refresh_token() -> str:
+def generate_opaque_token() -> str:
     return secrets.token_urlsafe(48)
 
 
-def hash_refresh_token(token: str) -> str:
-    # SHA-256, not Argon2: this is a high-entropy random token (not a
-    # user-chosen password), and refresh checks happen on every request that
-    # needs a new access token — a fast, deterministic hash is appropriate,
+def hash_opaque_token(token: str) -> str:
+    # SHA-256, not Argon2: this hashes high-entropy random tokens (refresh
+    # tokens, invitation tokens), not user-chosen passwords, and the check
+    # happens on every use — a fast, deterministic hash is appropriate here,
     # unlike passwords where slow hashing is the point.
     return sha256(token.encode()).hexdigest()

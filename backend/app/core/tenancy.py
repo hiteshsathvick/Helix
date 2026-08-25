@@ -15,3 +15,12 @@ async def set_tenant_context(session: AsyncSession, org_id: uuid.UUID) -> None:
     await session.execute(
         text("SELECT set_config('app.current_org', :org_id, true)"), {"org_id": str(org_id)}
     )
+
+
+async def set_current_user_context(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Lets RLS policies grant a session visibility into its own rows across
+    every org (e.g. 'list the orgs I belong to'), independent of whichever
+    single org set_tenant_context has scoped the session to, if any."""
+    await session.execute(
+        text("SELECT set_config('app.current_user_id', :user_id, true)"), {"user_id": str(user_id)}
+    )

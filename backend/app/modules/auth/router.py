@@ -51,7 +51,8 @@ async def login(
     refresh_token = await service.issue_refresh_token(db, user.id)
     _set_refresh_cookie(response, refresh_token)
     return AccessTokenResponse(
-        access_token=create_access_token(user.id), user=UserRead.model_validate(user)
+        access_token=create_access_token(user.id, user.active_org_id),
+        user=UserRead.model_validate(user),
     )
 
 
@@ -66,7 +67,8 @@ async def refresh(
     user, new_raw_token = await service.rotate_refresh_token(db, raw_token)
     _set_refresh_cookie(response, new_raw_token)
     return AccessTokenResponse(
-        access_token=create_access_token(user.id), user=UserRead.model_validate(user)
+        access_token=create_access_token(user.id, user.active_org_id),
+        user=UserRead.model_validate(user),
     )
 
 

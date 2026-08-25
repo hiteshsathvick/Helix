@@ -18,6 +18,7 @@ class UserRead(BaseModel):
     id: uuid.UUID
     email: str
     is_active: bool
+    active_org_id: uuid.UUID | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

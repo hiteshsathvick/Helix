@@ -15,11 +15,18 @@ class User(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     mfa_secret: Mapped[str | None] = mapped_column(String(255), default=None)
+    # The org a fresh access token gets scoped to on login/refresh — global
+    # per user, not per-session/device (Phase 4 scoping call). Updated by the
+    # switch-org endpoint. FK references orgs' table by name only, not an
+    # imported Organization class — keeps the module boundary intact.
+    active_org_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id"), default=None
+    )
 
 
 class RefreshToken(UUIDPKMixin, TimestampMixin, Base):
     """Opaque, rotating refresh tokens. Only the hash is ever stored — see
-    core.security.hash_refresh_token. A row with revoked_at set is dead even
+    core.security.hash_opaque_token. A row with revoked_at set is dead even
     if not yet expired (used on logout and on rotation of the prior token)."""
 
     __tablename__ = "refresh_tokens"

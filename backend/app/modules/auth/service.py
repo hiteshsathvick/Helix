@@ -1,5 +1,6 @@
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -8,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import ConflictError, UnauthorizedError
 from app.core.security import (
-    generate_refresh_token,
+    generate_opaque_token,
+    hash_opaque_token,
     hash_password,
-    hash_refresh_token,
     verify_password,
 )
 from app.modules.auth.models import RefreshToken, User
@@ -51,13 +52,30 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
     return user
 
 
+async def get_users_by_ids(
+    db: AsyncSession, user_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, User]:
+    """Public lookup other modules use instead of importing/querying User
+    directly — e.g. orgs needs member emails without reaching into auth's
+    table (CLAUDE.md §3: cross-module access goes through service interfaces)."""
+    if not user_ids:
+        return {}
+    result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    return {user.id: user for user in result.scalars().all()}
+
+
+async def set_active_org(db: AsyncSession, user: User, org_id: uuid.UUID) -> None:
+    user.active_org_id = org_id
+    await db.commit()
+
+
 async def issue_refresh_token(db: AsyncSession, user_id: uuid.UUID) -> str:
     settings = get_settings()
-    raw_token = generate_refresh_token()
+    raw_token = generate_opaque_token()
     db.add(
         RefreshToken(
             user_id=user_id,
-            token_hash=hash_refresh_token(raw_token),
+            token_hash=hash_opaque_token(raw_token),
             expires_at=datetime.now(UTC) + timedelta(days=settings.jwt_refresh_token_ttl_days),
         )
     )
@@ -73,7 +91,7 @@ async def rotate_refresh_token(db: AsyncSession, raw_token: str) -> tuple[User, 
     silently tolerated (SPEC.md §13: refresh tokens are rotating).
     """
     result = await db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw_token))
+        select(RefreshToken).where(RefreshToken.token_hash == hash_opaque_token(raw_token))
     )
     record = result.scalar_one_or_none()
 
@@ -95,7 +113,7 @@ async def rotate_refresh_token(db: AsyncSession, raw_token: str) -> tuple[User, 
 
 async def revoke_refresh_token(db: AsyncSession, raw_token: str) -> None:
     result = await db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw_token))
+        select(RefreshToken).where(RefreshToken.token_hash == hash_opaque_token(raw_token))
     )
     record = result.scalar_one_or_none()
     if record is not None and record.revoked_at is None:
