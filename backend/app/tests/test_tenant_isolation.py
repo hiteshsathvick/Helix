@@ -8,6 +8,7 @@ from app.core.db import session_factory
 from app.core.tenancy import set_tenant_context
 from app.modules.auth.models import User
 from app.modules.orgs.models import Membership, Organization
+from app.modules.orgs.system_roles import MEMBER_ROLE_ID
 
 
 @pytest.fixture
@@ -25,12 +26,12 @@ async def two_orgs_with_memberships():
         # mismatching current_org still satisfy WITH CHECK once we set the
         # context per insert.
         await set_tenant_context(setup_session, org_a.id)
-        membership_a = Membership(org_id=org_a.id, user_id=user_a.id)
+        membership_a = Membership(org_id=org_a.id, user_id=user_a.id, role_id=MEMBER_ROLE_ID)
         setup_session.add(membership_a)
         await setup_session.flush()
 
         await set_tenant_context(setup_session, org_b.id)
-        membership_b = Membership(org_id=org_b.id, user_id=user_b.id)
+        membership_b = Membership(org_id=org_b.id, user_id=user_b.id, role_id=MEMBER_ROLE_ID)
         setup_session.add(membership_b)
         await setup_session.flush()
 

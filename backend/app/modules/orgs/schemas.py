@@ -34,7 +34,31 @@ class MemberRead(BaseModel):
     user_id: uuid.UUID
     email: str
     status: str
+    role_name: str
     created_at: datetime
+
+
+class RoleRead(BaseModel):
+    id: uuid.UUID
+    org_id: uuid.UUID | None
+    name: str
+    permissions: list[str]
+
+    model_config = {"from_attributes": True}
+
+
+class RoleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class MembershipRoleUpdate(BaseModel):
+    role_id: uuid.UUID
+
+
+class MyPermissions(BaseModel):
+    role: RoleRead
+    permissions: list[str]
 
 
 class InvitationCreate(BaseModel):

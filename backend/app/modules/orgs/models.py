@@ -2,11 +2,25 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 from app.core.mixins import SoftDeleteMixin, TenantScopedMixin, TimestampMixin, UUIDPKMixin
+
+
+class Role(UUIDPKMixin, TimestampMixin, Base):
+    """org_id is nullable, unlike TenantScopedMixin's non-null FK: system
+    roles (Owner/Admin/Member/Viewer) are global (org_id NULL) and must stay
+    visible to every org; org-specific custom roles set it. No RLS here —
+    permission names aren't sensitive data, and "NULL or mine" visibility is
+    simpler to get right as an explicit query filter than as a policy."""
+
+    __tablename__ = "roles"
+
+    org_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("organizations.id"), default=None)
+    name: Mapped[str] = mapped_column(String(100))
+    permissions: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
 
 
 class Organization(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -22,9 +36,9 @@ class Membership(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, TenantScopedMixin
     __tablename__ = "memberships"
     __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_membership_org_user"),)
 
-    # role_id lands in Phase 5 (RBAC) as an additive migration once `roles` exists.
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(50), default="active")
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id"), nullable=False)
 
 
 class Invitation(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, TenantScopedMixin, Base):

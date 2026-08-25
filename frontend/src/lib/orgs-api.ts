@@ -14,7 +14,13 @@ export type Member = {
   user_id: string;
   email: string;
   status: string;
+  role_name: string;
   created_at: string;
+};
+
+export type MyPermissions = {
+  role: { id: string; org_id: string | null; name: string; permissions: string[] };
+  permissions: string[];
 };
 
 export type InvitationCreatedResponse = {
@@ -76,6 +82,15 @@ export async function switchOrg(
   const response = await authedFetch(`/api/v1/orgs/${orgId}/switch`, accessToken, {
     method: "POST",
   });
+  if (!response.ok) throw await toApiError(response);
+  return response.json();
+}
+
+export async function getMyPermissions(
+  accessToken: string,
+  orgId: string
+): Promise<MyPermissions> {
+  const response = await authedFetch(`/api/v1/orgs/${orgId}/me`, accessToken);
   if (!response.ok) throw await toApiError(response);
   return response.json();
 }

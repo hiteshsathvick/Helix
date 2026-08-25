@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/auth-context";
-import { inviteMember, listMembers, type Member } from "@/lib/orgs-api";
+import { getMyPermissions, inviteMember, listMembers, type Member } from "@/lib/orgs-api";
 
 function MembersContent() {
   const { accessToken } = useAuth();
@@ -13,6 +13,7 @@ function MembersContent() {
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [email, setEmail] = useState("");
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -28,6 +29,18 @@ function MembersContent() {
   useEffect(() => {
     loadMembers();
   }, [loadMembers]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    // The server is still authoritative (POST /invitations 403s regardless)
+    // — this only decides what the UI shows, per the guide's "hide/disable
+    // by permission" frontend rule.
+    getMyPermissions(accessToken, orgId)
+      .then((data) => setPermissions(data.permissions))
+      .catch(() => setPermissions([]));
+  }, [accessToken, orgId]);
+
+  const canInvite = permissions.includes("members:invite");
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,33 +68,35 @@ function MembersContent() {
       <ul data-testid="member-list" className="flex flex-col gap-1">
         {members.map((member) => (
           <li key={member.id}>
-            {member.email} — {member.status}
+            {member.email} — {member.role_name} ({member.status})
           </li>
         ))}
       </ul>
 
-      <form onSubmit={handleInvite} className="flex w-full max-w-sm flex-col gap-3">
-        <input
-          type="email"
-          placeholder="Invite by email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-          className="rounded border px-3 py-2"
-        />
-        {inviteError && (
-          <p data-testid="invite-error" className="text-red-600">
-            {inviteError}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-black px-3 py-2 text-white disabled:opacity-50"
-        >
-          {submitting ? "Inviting…" : "Invite"}
-        </button>
-      </form>
+      {canInvite && (
+        <form onSubmit={handleInvite} className="flex w-full max-w-sm flex-col gap-3">
+          <input
+            type="email"
+            placeholder="Invite by email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            className="rounded border px-3 py-2"
+          />
+          {inviteError && (
+            <p data-testid="invite-error" className="text-red-600">
+              {inviteError}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded bg-black px-3 py-2 text-white disabled:opacity-50"
+          >
+            {submitting ? "Inviting…" : "Invite"}
+          </button>
+        </form>
+      )}
 
       {inviteLink && (
         <p data-testid="invite-link" className="max-w-sm break-all text-center text-sm">

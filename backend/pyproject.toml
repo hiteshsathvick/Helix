@@ -35,7 +35,11 @@ extend-exclude = ["alembic/versions"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "app.modules.orgs.dependencies.require_permission",
+]
 
 [tool.mypy]
 python_version = "3.12"
