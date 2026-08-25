@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.core.config import get_settings
+from app.core.db import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -13,9 +14,7 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
-# No ORM models exist yet (Phase 0). Later phases point this at Base.metadata
-# from a shared declarative base so autogenerate has something to diff against.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
