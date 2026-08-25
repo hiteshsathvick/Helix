@@ -70,7 +70,13 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql+asyncpg://helix:helix@localhost:5432/helix
+      # helix is a superuser (Postgres bootstrap requirement) and must never
+      # be the runtime role: superusers bypass Row-Level Security. Migrations
+      # run as helix; the app (and pytest, since it imports app.core.db) runs
+      # as helix_app, created below the same way
+      # infra/docker/postgres-init/01-app-role.sql does for local dev.
+      DATABASE_URL: postgresql+asyncpg://helix_app:helix_app@localhost:5432/helix
+      MIGRATIONS_DATABASE_URL: postgresql+asyncpg://helix:helix@localhost:5432/helix
       REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +84,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e "backend[dev]"
+      - run: psql -h localhost -U helix -d helix -f infra/docker/postgres-init/01-app-role.sql
+        env:
+          PGPASSWORD: helix
       - run: alembic upgrade head
         working-directory: backend
       - run: alembic downgrade base
