@@ -15,6 +15,8 @@ dependencies = [
     "pyjwt>=2.9,<3",
     "redis>=5.0,<6",
     "email-validator>=2.2,<3",
+    "boto3>=1.34,<2",
+    "python-multipart>=0.0.9,<0.1",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +40,7 @@ select = ["E", "F", "I", "UP", "B"]
 extend-immutable-calls = [
     "fastapi.Depends",
     "fastapi.Query",
+    "fastapi.File",
     "app.modules.orgs.dependencies.require_permission",
 ]
 

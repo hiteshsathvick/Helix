@@ -55,6 +55,11 @@ class RateLimitedError(HelixError):
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
 
 
+class PayloadTooLargeError(HelixError):
+    code = "payload_too_large"
+    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+
+
 def _envelope(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 

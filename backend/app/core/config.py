@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     s3_access_key: str = "helix"
     s3_secret_key: str = "helix-secret"
     s3_bucket: str = "helix"
+    documents_max_upload_bytes: int = 50 * 1024 * 1024
 
     # JWT signing keys, keyed by `kid`. The mechanism supports multiple
     # concurrently-valid keys (for future rotation); only one is active for

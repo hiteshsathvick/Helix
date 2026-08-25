@@ -29,9 +29,14 @@ function AccountContent() {
         <h2 className="text-lg font-medium">Organizations</h2>
         <OrgSwitcher />
         {user?.active_org_id && (
-          <Link href={`/orgs/${user.active_org_id}/members`} className="text-sm underline">
-            View members
-          </Link>
+          <div className="flex gap-3">
+            <Link href={`/orgs/${user.active_org_id}/members`} className="text-sm underline">
+              View members
+            </Link>
+            <Link href={`/orgs/${user.active_org_id}/documents`} className="text-sm underline">
+              View documents
+            </Link>
+          </div>
         )}
       </div>
 
