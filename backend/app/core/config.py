@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     s3_secret_key: str = "helix-secret"
     s3_bucket: str = "helix"
 
+    # JWT signing keys, keyed by `kid`. The mechanism supports multiple
+    # concurrently-valid keys (for future rotation); only one is active for
+    # signing new tokens at a time.
+    jwt_signing_keys: dict[str, str] = {"local-dev-key-1": "change-me-in-every-real-environment"}
+    jwt_active_kid: str = "local-dev-key-1"
+    jwt_access_token_ttl_minutes: int = 15
+    jwt_refresh_token_ttl_days: int = 30
+
+    auth_rate_limit_max_attempts: int = 5
+    auth_rate_limit_window_seconds: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

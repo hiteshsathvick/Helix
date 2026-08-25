@@ -7,3 +7,24 @@ export async function fetchHealth(): Promise<{ status: string }> {
   }
   return response.json();
 }
+
+export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  return fetch(`${API_URL}${path}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+}
+
+export async function toApiError(response: Response): Promise<Error> {
+  try {
+    const body = await response.json();
+    return new Error(body?.error?.message ?? `request failed: ${response.status}`);
+  } catch {
+    return new Error(`request failed: ${response.status}`);
+  }
+}

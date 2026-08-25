@@ -19,6 +19,7 @@ def create_app() -> FastAPI:
         allow_origins=["http://localhost:3000"],
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_credentials=True,
     )
     app.add_middleware(RequestIDMiddleware)
 

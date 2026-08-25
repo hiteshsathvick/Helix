@@ -40,6 +40,16 @@ class ConflictError(HelixError):
     status_code = status.HTTP_409_CONFLICT
 
 
+class UnauthorizedError(HelixError):
+    code = "unauthorized"
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+
+class RateLimitedError(HelixError):
+    code = "rate_limited"
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+
 def _envelope(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 

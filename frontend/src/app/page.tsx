@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchHealth } from "@/lib/api";
 
@@ -22,7 +23,6 @@ export default function HomePage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-24">
       <h1 className="text-2xl font-semibold">Helix</h1>
-      <p>Phase 0: repository & architecture setup</p>
       {health.kind === "loading" && <p>Checking backend health…</p>}
       {health.kind === "ok" && <p data-testid="health-status">Backend status: {health.status}</p>}
       {health.kind === "error" && (
@@ -30,6 +30,17 @@ export default function HomePage() {
           Backend unreachable: {health.message}
         </p>
       )}
+      <nav className="flex gap-4">
+        <Link href="/login" className="underline">
+          Log in
+        </Link>
+        <Link href="/register" className="underline">
+          Register
+        </Link>
+        <Link href="/account" className="underline">
+          Account
+        </Link>
+      </nav>
     </main>
   );
 }
