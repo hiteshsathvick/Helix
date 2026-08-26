@@ -118,6 +118,20 @@ jobs:
       - run: pytest
         working-directory: backend
 
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -125,3 +139,25 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - run: docker build -f infra/docker/backend.Dockerfile -t helix-backend:ci .
       - run: docker build -f infra/docker/frontend.Dockerfile -t helix-frontend:ci .
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose up -d --build --wait
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - if: always()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v

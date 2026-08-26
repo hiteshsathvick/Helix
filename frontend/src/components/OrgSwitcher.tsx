@@ -1,32 +1,27 @@
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { listMyOrgs, switchOrg, type Org } from "@/lib/orgs-api";
+import { listMyOrgs, switchOrg } from "@/lib/orgs-api";
 
 export function OrgSwitcher() {
   const { user, accessToken, applySession } = useAuth();
-  const [orgs, setOrgs] = useState<Org[]>([]);
-  const [switching, setSwitching] = useState(false);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (!accessToken) return;
-    listMyOrgs(accessToken)
-      .then(setOrgs)
-      .catch(() => setOrgs([]));
-  }, [accessToken, user?.active_org_id]);
+  const { data: orgs = [] } = useQuery({
+    queryKey: ["orgs", "mine", accessToken],
+    queryFn: () => listMyOrgs(accessToken!),
+    enabled: !!accessToken,
+  });
 
-  async function handleSwitch(orgId: string) {
-    if (!accessToken || orgId === user?.active_org_id) return;
-    setSwitching(true);
-    try {
-      const response = await switchOrg(accessToken, orgId);
+  const switchMutation = useMutation({
+    mutationFn: (orgId: string) => switchOrg(accessToken!, orgId),
+    onSuccess: (response) => {
       applySession(response);
-    } finally {
-      setSwitching(false);
-    }
-  }
+      queryClient.invalidateQueries({ queryKey: ["orgs", "mine"] });
+    },
+  });
 
   if (!accessToken) return null;
 
@@ -37,8 +32,10 @@ export function OrgSwitcher() {
         {orgs.map((org) => (
           <button
             key={org.id}
-            onClick={() => handleSwitch(org.id)}
-            disabled={switching}
+            onClick={() => {
+              if (org.id !== user?.active_org_id) switchMutation.mutate(org.id);
+            }}
+            disabled={switchMutation.isPending}
             data-testid={`org-option-${org.slug}`}
             className={`rounded border px-3 py-1 text-sm disabled:opacity-50 ${
               org.id === user?.active_org_id ? "bg-black text-white" : ""

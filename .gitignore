@@ -18,6 +18,11 @@ frontend/out/
 *.tsbuildinfo
 npm-debug.log*
 
+# Test output
+frontend/playwright-report/
+frontend/test-results/
+frontend/coverage/
+
 # OS
 .DS_Store
 Thumbs.db

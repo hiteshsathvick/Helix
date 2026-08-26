@@ -1,10 +1,11 @@
 "use client";
 
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { type FormEvent, type ReactNode, useState } from "react";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { Alert, Button, EmptyState, Input, Spinner } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
-import { search, type SearchResult } from "@/lib/search-api";
+import { search } from "@/lib/search-api";
 
 // Matches search.service.HIGHLIGHT_START/STOP on the backend — control
 // characters, not HTML tags, precisely so this can highlight matches by
@@ -28,66 +29,58 @@ function renderSnippet(snippet: string): ReactNode[] {
   return nodes;
 }
 
-function SearchContent() {
+export default function SearchPage() {
   const { accessToken } = useAuth();
   const params = useParams<{ id: string }>();
   const orgId = params.id;
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  // Separate from `query` so typing doesn't trigger a search — only
+  // submitting the form (or loading more of the same search) does.
+  const [submittedQuery, setSubmittedQuery] = useState("");
 
-  async function runSearch(cursor?: string) {
-    if (!accessToken || !query.trim()) return;
-    setLoading(true);
-    setSearchError(null);
-    try {
-      const response = await search(accessToken, orgId, query, cursor);
-      setResults((prev) => (cursor ? [...prev, ...response.results] : response.results));
-      setNextCursor(response.next_cursor);
-      setHasSearched(true);
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : "search failed");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const searchQuery = useInfiniteQuery({
+    queryKey: ["search", orgId, submittedQuery],
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+      search(accessToken!, orgId, submittedQuery, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: !!accessToken && !!submittedQuery,
+  });
+
+  const results = searchQuery.data?.pages.flatMap((page) => page.results) ?? [];
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    runSearch();
+    if (!query.trim()) return;
+    setSubmittedQuery(query.trim());
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center gap-6 p-24">
+    <>
       <h1 className="text-2xl font-semibold">Search</h1>
 
       <form onSubmit={handleSubmit} className="flex w-full max-w-md gap-2">
-        <input
+        <Input
           type="text"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search documents…"
           data-testid="search-input"
-          className="flex-1 rounded border px-3 py-2"
+          className="flex-1"
         />
-        <button
-          type="submit"
-          disabled={loading || !query.trim()}
-          className="rounded border px-4 py-2 disabled:opacity-50"
-        >
+        <Button type="submit" variant="secondary" disabled={searchQuery.isFetching || !query.trim()}>
           Search
-        </button>
+        </Button>
       </form>
 
-      {searchError && <p className="text-red-600">{searchError}</p>}
-
-      {hasSearched && !loading && results.length === 0 && !searchError && (
-        <p className="text-gray-500">No results found.</p>
+      {searchQuery.isFetching && !searchQuery.isFetchingNextPage && (
+        <Spinner label="Searching…" />
       )}
+      {searchQuery.isError && (
+        <Alert>{searchQuery.error instanceof Error ? searchQuery.error.message : "search failed"}</Alert>
+      )}
+      {searchQuery.isSuccess && results.length === 0 && <EmptyState>No results found.</EmptyState>}
 
       <ul data-testid="search-results" className="flex w-full max-w-md flex-col gap-4">
         {results.map((result) => (
@@ -98,23 +91,11 @@ function SearchContent() {
         ))}
       </ul>
 
-      {nextCursor && (
-        <button
-          onClick={() => runSearch(nextCursor)}
-          disabled={loading}
-          className="text-sm underline disabled:opacity-50"
-        >
-          {loading ? "Loading…" : "Load more"}
-        </button>
+      {searchQuery.hasNextPage && (
+        <Button variant="link" onClick={() => searchQuery.fetchNextPage()} disabled={searchQuery.isFetchingNextPage}>
+          {searchQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+        </Button>
       )}
-    </main>
-  );
-}
-
-export default function SearchPage() {
-  return (
-    <ProtectedRoute>
-      <SearchContent />
-    </ProtectedRoute>
+    </>
   );
 }

@@ -1,8 +1,11 @@
 "use client";
 
+import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, Suspense, useState } from "react";
+import { Alert, Button, Input } from "@/components/ui";
+import { GuestRoute } from "@/components/GuestRoute";
 import { useAuth } from "@/lib/auth-context";
 
 function LoginForm() {
@@ -11,21 +14,15 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const loginMutation = useMutation({
+    mutationFn: () => login(email, password),
+    onSuccess: () => router.push("/account"),
+  });
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      await login(email, password);
-      router.push("/account");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "login failed");
-    } finally {
-      setSubmitting(false);
-    }
+    loginMutation.mutate();
   }
 
   return (
@@ -35,34 +32,28 @@ function LoginForm() {
         <p data-testid="registered-notice">Account created — log in below.</p>
       )}
       <form onSubmit={handleSubmit} className="flex w-full max-w-sm flex-col gap-3">
-        <input
+        <Input
           type="email"
           placeholder="Email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           required
-          className="rounded border px-3 py-2"
         />
-        <input
+        <Input
           type="password"
           placeholder="Password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           required
-          className="rounded border px-3 py-2"
         />
-        {error && (
-          <p data-testid="login-error" className="text-red-600">
-            {error}
-          </p>
+        {loginMutation.isError && (
+          <Alert data-testid="login-error">
+            {loginMutation.error instanceof Error ? loginMutation.error.message : "login failed"}
+          </Alert>
         )}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-black px-3 py-2 text-white disabled:opacity-50"
-        >
-          {submitting ? "Logging in…" : "Log in"}
-        </button>
+        <Button type="submit" disabled={loginMutation.isPending}>
+          {loginMutation.isPending ? "Logging in…" : "Log in"}
+        </Button>
       </form>
       <p>
         No account?{" "}
@@ -76,8 +67,10 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense>
-      <LoginForm />
-    </Suspense>
+    <GuestRoute>
+      <Suspense>
+        <LoginForm />
+      </Suspense>
+    </GuestRoute>
   );
 }
