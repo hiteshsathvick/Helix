@@ -23,6 +23,7 @@ dependencies = [
     "pypdf>=4.3,<5",
     "beautifulsoup4>=4.12,<5",
     "tiktoken>=0.7,<0.8",
+    "anthropic>=0.40,<1",
 ]
 
 [project.optional-dependencies]

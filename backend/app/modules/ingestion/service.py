@@ -120,3 +120,17 @@ async def get_snippets(
     stmt = select(Chunk.id, headline).where(Chunk.org_id == org_id, Chunk.id.in_(chunk_ids))
     result = await db.execute(stmt)
     return {row.id: row.snippet for row in result.all()}
+
+
+async def get_chunk_contents(
+    db: AsyncSession, org_id: uuid.UUID, chunk_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Full chunk text, for the assistant's (Phase 10) context assembly —
+    distinct from get_snippets, which returns a short query-highlighted
+    excerpt for search UI display, not enough text to answer a question
+    from.
+    """
+    await set_tenant_context(db, org_id)
+    stmt = select(Chunk.id, Chunk.content).where(Chunk.org_id == org_id, Chunk.id.in_(chunk_ids))
+    result = await db.execute(stmt)
+    return {row.id: row.content for row in result.all()}

@@ -40,6 +40,19 @@ class Settings(BaseSettings):
     ingestion_chunk_overlap_tokens: int = 100
     ingestion_max_job_attempts: int = 3
 
+    # Phase 11 replaces this with the real swappable multi-provider
+    # abstraction (SPEC.md §17); for now the assistant needs *some* LLM
+    # call, wired to exactly one provider.
+    anthropic_api_key: str = ""
+    llm_model: str = "claude-sonnet-5"
+    assistant_top_k: int = 6
+    assistant_context_token_budget: int = 3000
+    assistant_max_output_tokens: int = 1024
+    # Bounds how much prior conversation gets replayed to the model each
+    # turn — without this a long-running conversation's history would grow
+    # its own (unbudgeted) token cost every single turn.
+    assistant_max_history_messages: int = 10
+
 
 @lru_cache
 def get_settings() -> Settings:

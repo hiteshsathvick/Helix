@@ -2,32 +2,11 @@
 
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { Alert, Button, EmptyState, Input, Spinner } from "@/components/ui";
+import { HighlightedSnippet } from "@/components/HighlightedSnippet";
 import { useAuth } from "@/lib/auth-context";
 import { search } from "@/lib/search-api";
-
-// Matches search.service.HIGHLIGHT_START/STOP on the backend — control
-// characters, not HTML tags, precisely so this can highlight matches by
-// splitting the string rather than parsing snippet text as HTML (chunk
-// content is untrusted; see CLAUDE.md §5).
-const HIGHLIGHT_START = "\u0001";
-const HIGHLIGHT_STOP = "\u0002";
-
-function renderSnippet(snippet: string): ReactNode[] {
-  const segments = snippet.split(HIGHLIGHT_START);
-  const nodes: ReactNode[] = [segments[0]];
-  for (let i = 1; i < segments.length; i++) {
-    const [highlighted, ...rest] = segments[i].split(HIGHLIGHT_STOP);
-    nodes.push(
-      <mark key={i} className="rounded bg-yellow-200 px-0.5 text-black">
-        {highlighted}
-      </mark>
-    );
-    nodes.push(rest.join(HIGHLIGHT_STOP));
-  }
-  return nodes;
-}
 
 export default function SearchPage() {
   const { accessToken } = useAuth();
@@ -86,7 +65,9 @@ export default function SearchPage() {
         {results.map((result) => (
           <li key={result.chunk_id} className="flex flex-col gap-1 border-b pb-3">
             <span className="font-medium">{result.document_title}</span>
-            <span className="text-sm text-gray-700">{renderSnippet(result.snippet)}</span>
+            <span className="text-sm text-gray-700">
+              <HighlightedSnippet snippet={result.snippet} />
+            </span>
           </li>
         ))}
       </ul>
