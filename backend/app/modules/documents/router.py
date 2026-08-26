@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.core.errors import NotFoundError
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.documents import service
 from app.modules.documents.schemas import DocumentRead
+from app.modules.ingestion import service as ingestion_service
+from app.modules.ingestion.schemas import JobRead
 from app.modules.orgs.dependencies import require_permission
 from app.modules.orgs.system_roles import PERMISSION_DOCUMENTS_READ, PERMISSION_DOCUMENTS_WRITE
 
@@ -51,3 +54,25 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await service.delete_document(db, org_id, document_id)
+
+
+@router.post("/{document_id}/reindex", response_model=JobRead, status_code=status.HTTP_202_ACCEPTED)
+async def reindex_document(
+    document_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(require_permission(PERMISSION_DOCUMENTS_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> JobRead:
+    job = await service.reindex_document(db, org_id, document_id)
+    return JobRead.model_validate(job)
+
+
+@router.get("/{document_id}/ingestion", response_model=JobRead)
+async def get_ingestion_status(
+    document_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(require_permission(PERMISSION_DOCUMENTS_READ)),
+    db: AsyncSession = Depends(get_db),
+) -> JobRead:
+    job = await ingestion_service.get_latest_job(db, org_id, document_id)
+    if job is None:
+        raise NotFoundError("no ingestion job found for this document")
+    return JobRead.model_validate(job)

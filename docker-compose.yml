@@ -71,7 +71,7 @@ services:
     build:
       context: .
       dockerfile: infra/docker/backend.Dockerfile
-    command: python -m app.workers.run
+    command: arq app.workers.run.WorkerSettings --watch /srv
     env_file:
       - .env
     volumes:

@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.db import Base
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401
+from app.modules.ingestion import models as ingestion_models  # noqa: F401
 from app.modules.orgs import models as orgs_models  # noqa: F401
 
 config = context.config

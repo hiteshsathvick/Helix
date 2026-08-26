@@ -85,3 +85,14 @@ async def delete_object(key: str) -> None:
         client.delete_object(Bucket=settings.s3_bucket, Key=key)
 
     await run_in_threadpool(_delete)
+
+
+async def download_object(key: str) -> bytes:
+    settings = get_settings()
+
+    def _download() -> bytes:
+        client = get_s3_client()
+        response = client.get_object(Bucket=settings.s3_bucket, Key=key)
+        return response["Body"].read()
+
+    return await run_in_threadpool(_download)

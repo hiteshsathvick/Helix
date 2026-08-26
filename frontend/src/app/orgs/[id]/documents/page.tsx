@@ -4,7 +4,13 @@ import { useParams } from "next/navigation";
 import { type ChangeEvent, useCallback, useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/lib/auth-context";
-import { deleteDocument, listDocuments, uploadDocument, type Document } from "@/lib/documents-api";
+import {
+  deleteDocument,
+  listDocuments,
+  reindexDocument,
+  uploadDocument,
+  type Document,
+} from "@/lib/documents-api";
 import { getMyPermissions } from "@/lib/orgs-api";
 
 function DocumentsContent() {
@@ -36,6 +42,14 @@ function DocumentsContent() {
       .catch(() => setPermissions([]));
   }, [accessToken, orgId]);
 
+  // Ingestion runs asynchronously in a worker — poll while anything is still
+  // "pending" so status/reindex reflect real progress without a manual reload.
+  useEffect(() => {
+    if (!documents.some((d) => d.status === "pending")) return;
+    const interval = setInterval(loadDocuments, 3000);
+    return () => clearInterval(interval);
+  }, [documents, loadDocuments]);
+
   const canWrite = permissions.includes("documents:write");
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -60,6 +74,12 @@ function DocumentsContent() {
     loadDocuments();
   }
 
+  async function handleReindex(documentId: string) {
+    if (!accessToken) return;
+    await reindexDocument(accessToken, orgId, documentId);
+    loadDocuments();
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-24">
       <h1 className="text-2xl font-semibold">Documents</h1>
@@ -68,16 +88,24 @@ function DocumentsContent() {
       <ul data-testid="document-list" className="flex w-full max-w-md flex-col gap-2">
         {documents.map((document) => (
           <li key={document.id} className="flex items-center justify-between gap-3">
-            <span>
+            <span data-testid={`document-status-${document.id}`}>
               {document.title} ({document.status})
             </span>
             {canWrite && (
-              <button
-                onClick={() => handleDelete(document.id)}
-                className="text-sm text-red-600 underline"
-              >
-                Delete
-              </button>
+              <span className="flex gap-2">
+                <button
+                  onClick={() => handleReindex(document.id)}
+                  className="text-sm underline"
+                >
+                  Reindex
+                </button>
+                <button
+                  onClick={() => handleDelete(document.id)}
+                  className="text-sm text-red-600 underline"
+                >
+                  Delete
+                </button>
+              </span>
             )}
           </li>
         ))}

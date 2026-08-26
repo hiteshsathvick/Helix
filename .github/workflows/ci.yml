@@ -12,7 +12,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "backend[dev]"
+      # --extra-index-url resolves torch to its CPU-only build (see
+      # infra/docker/backend.Dockerfile) instead of the ~2.6GB CUDA default.
+      - run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
       - run: ruff check backend
       - run: ruff format --check backend
       - uses: actions/setup-node@v4
@@ -32,7 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "backend[dev]"
+      - run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
       - run: mypy backend/app
       - uses: actions/setup-node@v4
         with:
@@ -69,6 +71,23 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      minio:
+        # bitnami's image (not minio/minio) specifically because GitHub
+        # Actions service containers can't override the container command —
+        # minio/minio's default CMD needs `server /data` args to actually
+        # start, which isn't possible here; bitnami's entrypoint runs a real
+        # server from env vars alone.
+        image: bitnami/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: helix
+          MINIO_ROOT_PASSWORD: helix-secret
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       # helix is a superuser (Postgres bootstrap requirement) and must never
       # be the runtime role: superusers bypass Row-Level Security. Migrations
@@ -78,12 +97,15 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://helix_app:helix_app@localhost:5432/helix
       MIGRATIONS_DATABASE_URL: postgresql+asyncpg://helix:helix@localhost:5432/helix
       REDIS_URL: redis://localhost:6379/0
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_ACCESS_KEY: helix
+      S3_SECRET_KEY: helix-secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "backend[dev]"
+      - run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
       - run: psql -h localhost -U helix -d helix -f infra/docker/postgres-init/01-app-role.sql
         env:
           PGPASSWORD: helix

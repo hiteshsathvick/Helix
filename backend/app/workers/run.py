@@ -1,24 +1,20 @@
-"""Phase 0 stub worker entrypoint.
-
-Proves the shared backend image can boot a second process distinct from the
-API. Real job processing (Arq/Celery) is wired up in the ingestion/background
-jobs phase.
+"""Arq worker entrypoint — run via `arq app.workers.run.WorkerSettings`
+(see docker-compose.yml). Registers the ingestion pipeline's task; future
+phases (agents, workflows) register their own tasks here too.
 """
 
-import logging
-import time
+from arq import func as arq_func
+from arq.connections import RedisSettings
 
+from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.modules.ingestion.tasks import ingest_document_task
 
-logger = logging.getLogger("helix.worker")
+configure_logging()
 
-
-def main() -> None:
-    configure_logging()
-    logger.info("worker started (Phase 0 stub, no jobs registered yet)")
-    while True:
-        time.sleep(60)
+_settings = get_settings()
 
 
-if __name__ == "__main__":
-    main()
+class WorkerSettings:
+    functions = [arq_func(ingest_document_task, max_tries=_settings.ingestion_max_job_attempts)]
+    redis_settings = RedisSettings.from_dsn(_settings.redis_url)

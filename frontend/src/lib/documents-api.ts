@@ -51,3 +51,19 @@ export async function deleteDocument(
   });
   if (!response.ok) throw await toApiError(response);
 }
+
+export async function reindexDocument(
+  accessToken: string,
+  orgId: string,
+  documentId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/v1/orgs/${orgId}/documents/${documentId}/reindex`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+  if (!response.ok) throw await toApiError(response);
+}

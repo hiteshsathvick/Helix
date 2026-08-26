@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     auth_rate_limit_max_attempts: int = 5
     auth_rate_limit_window_seconds: int = 60
 
+    # Phase 11 replaces this with the real swappable multi-provider
+    # abstraction (SPEC.md §17); for now the pipeline needs *some* embedding
+    # function, and this local CPU model is real semantic embeddings at zero
+    # API cost — no key required.
+    embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    ingestion_chunk_tokens: int = 800
+    ingestion_chunk_overlap_tokens: int = 100
+    ingestion_max_job_attempts: int = 3
+
 
 @lru_cache
 def get_settings() -> Settings:

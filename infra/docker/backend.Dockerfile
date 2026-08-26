@@ -7,8 +7,12 @@ WORKDIR /srv
 RUN groupadd --system helix && useradd --system --gid helix --create-home helix
 
 COPY backend/pyproject.toml ./
+# sentence-transformers pulls in torch, which defaults to the CUDA build on
+# Linux (~2.6GB of NVIDIA libraries this container, with no GPU, will never
+# use). The CPU wheel index resolves torch itself to a CPU-only build while
+# every other dependency still comes from PyPI as normal.
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e ".[dev]"
+    && pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev]"
 
 COPY backend/ ./
 
