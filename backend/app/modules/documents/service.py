@@ -150,3 +150,22 @@ async def get_document_storage_info(
     and interpret the file, without handing over the full Document row."""
     document = await get_document(db, org_id, document_id)
     return document.storage_key, document.mime
+
+
+async def get_document_titles(
+    db: AsyncSession, org_id: uuid.UUID, document_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """For search (Phase 8): titles for citations, doubling as an existence
+    check — a soft-deleted or missing document simply won't be a key in the
+    returned dict, letting callers drop chunks that belong to it."""
+    if not document_ids:
+        return {}
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(Document.id, Document.title).where(
+            Document.org_id == org_id,
+            Document.id.in_(document_ids),
+            Document.deleted_at.is_(None),
+        )
+    )
+    return {document_id: title for document_id, title in result.all()}

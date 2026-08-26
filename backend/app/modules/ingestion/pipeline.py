@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import uuid
 
@@ -13,13 +12,9 @@ from app.modules.ingestion.chunking import chunk_text
 from app.modules.ingestion.embeddings import embed_texts
 from app.modules.ingestion.extraction import extract_text
 from app.modules.ingestion.models import Chunk
+from app.modules.ingestion.service import compute_acl_hash
 
 logger = logging.getLogger("helix.ingestion")
-
-
-def _compute_acl_hash(principals: list[tuple[str, uuid.UUID]]) -> str:
-    normalized = sorted(f"{ptype}:{pid}" for ptype, pid in principals)
-    return hashlib.sha256("|".join(normalized).encode()).hexdigest()
 
 
 async def run_ingestion(db: AsyncSession, org_id: uuid.UUID, document_id: uuid.UUID) -> int:
@@ -43,7 +38,7 @@ async def run_ingestion(db: AsyncSession, org_id: uuid.UUID, document_id: uuid.U
     embeddings = embed_texts(pieces)
 
     principals = await documents_service.get_document_acl_principals(db, org_id, document_id)
-    acl_hash = _compute_acl_hash(principals)
+    acl_hash = compute_acl_hash(principals)
 
     await db.execute(delete(Chunk).where(Chunk.document_id == document_id, Chunk.org_id == org_id))
     for ordinal, (piece, embedding) in enumerate(zip(pieces, embeddings, strict=True)):
