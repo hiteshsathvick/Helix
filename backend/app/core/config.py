@@ -67,6 +67,19 @@ class Settings(BaseSettings):
     # its own (unbudgeted) token cost every single turn.
     assistant_max_history_messages: int = 10
 
+    # Agent runtime guardrails (SPEC.md §19) — hard-enforced in code, not
+    # just prompted. agent_max_run_cost_usd is a per-*run* ceiling (aborts a
+    # single pathological run); the org-wide monthly cap from ai-config
+    # (ai_default_monthly_cost_cap_usd above / an org's override) is checked
+    # separately, before a run is even enqueued.
+    agent_max_steps: int = 8
+    agent_run_timeout_seconds: int = 120
+    agent_max_run_cost_usd: float = 1.0
+    agent_max_job_attempts: int = 1
+    # Default-deny (SPEC.md §29): empty means the http_request tool refuses
+    # every host until explicit hostnames are added here.
+    agent_http_allowlist: list[str] = []
+
 
 @lru_cache
 def get_settings() -> Settings:

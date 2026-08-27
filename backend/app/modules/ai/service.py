@@ -2,23 +2,39 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.modules.ai.providers import Message, TextDelta, UsageInfo, compute_cost, get_provider
+from app.modules.ai.providers import (
+    Message,
+    TextDelta,
+    ToolCall,
+    ToolCompletionResult,
+    ToolSpec,
+    UsageInfo,
+    compute_cost,
+    get_provider,
+)
 from app.modules.ai.schemas import OrgAIConfigUpdate
 from app.modules.orgs import service as orgs_service
 
 logger = logging.getLogger("helix.ai")
 
 __all__ = [
+    "Message",
     "TextDelta",
     "UsageInfo",
+    "ToolSpec",
+    "ToolCall",
+    "ToolCompletionResult",
     "compute_cost",
     "resolve_org_ai_config",
     "update_org_ai_config",
     "stream_completion",
+    "complete_with_tools",
+    "tool_result_messages",
     "OrgAIConfig",
 ]
 
@@ -89,3 +105,27 @@ async def stream_completion(
     llm = get_provider(provider_name)
     async for event in llm.stream(system, messages, model_name, max_tokens):
         yield event
+
+
+async def complete_with_tools(
+    system: str,
+    messages: list[Message],
+    max_tokens: int,
+    tools: list[ToolSpec],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> ToolCompletionResult:
+    """One non-streaming, tool-calling-capable turn (SPEC.md §19 agent
+    runtime) via the resolved provider."""
+    settings = get_settings()
+    provider_name = provider or settings.ai_default_provider
+    model_name = model or _default_model_for(provider_name, settings)
+    llm = get_provider(provider_name)
+    return await llm.complete_with_tools(system, messages, model_name, max_tokens, tools)
+
+
+def tool_result_messages(
+    provider: str, tool_calls: list[ToolCall], results: dict[str, dict[str, Any]]
+) -> list[Message]:
+    return get_provider(provider).tool_result_messages(tool_calls, results)

@@ -1,18 +1,15 @@
 """Provider-agnostic LLM interface (SPEC.md §17). Every provider implements
-the same `stream()` contract; nothing outside this module ever imports a
-provider SDK directly (CLAUDE.md §7).
-
-`tools()` from SPEC.md §17 is deliberately not part of `LLMProvider` yet —
-nothing calls it until the Agents phase, and adding it now would be unused
-surface area (CLAUDE.md §2: implement only the current phase's scope).
+the same `stream()`/`complete_with_tools()` contract; nothing outside this
+module ever imports a provider SDK directly (CLAUDE.md §7).
 """
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import cast
+from typing import Any, cast
 
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam as AnthropicMessageParam
@@ -22,10 +19,13 @@ from app.core.config import get_settings
 
 logger = logging.getLogger("helix.ai")
 
-# {"role": "user" | "assistant", "content": str} — the same shape
-# assistant/service.py already builds from Message history; both the
-# Anthropic and OpenAI-compatible SDKs accept this directly.
-Message = dict[str, str]
+# {"role": ..., "content": ...} — usually {"role": "user"|"assistant",
+# "content": str} (assistant/service.py's shape), but a value can also be a
+# provider-native structured block list: the agents module (Phase 12) never
+# builds these by hand, it only ever appends what
+# `complete_with_tools`/`tool_result_messages` below hand back, so each
+# provider's own format round-trips through its own calls untouched.
+Message = dict[str, Any]
 
 
 @dataclass
@@ -37,6 +37,31 @@ class TextDelta:
 class UsageInfo:
     input_tokens: int
     output_tokens: int
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    description: str
+    parameters: dict[str, Any]  # JSON schema for the tool's input object
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class ToolCompletionResult:
+    text: str
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    # The exact message to append to history representing this turn, in
+    # whichever provider-native shape produced it — see the `Message` note
+    # above.
+    assistant_message: Message = field(default_factory=dict)
+    usage: UsageInfo = field(default_factory=lambda: UsageInfo(0, 0))
 
 
 # $ per million tokens (input, output), verified against each provider's
@@ -65,6 +90,29 @@ class LLMProvider(ABC):
         """Streams a single completion. Yields `TextDelta`s as they arrive,
         then exactly one final `UsageInfo` once the model is done."""
 
+    @abstractmethod
+    async def complete_with_tools(
+        self,
+        system: str,
+        messages: list[Message],
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec],
+    ) -> ToolCompletionResult:
+        """One non-streaming turn with tool-calling available (SPEC.md §19
+        agent runtime). Never streamed — the agents loop needs the complete
+        set of tool calls before it can execute any of them."""
+
+    @abstractmethod
+    def tool_result_messages(
+        self, tool_calls: list[ToolCall], results: dict[str, dict[str, Any]]
+    ) -> list[Message]:
+        """Builds the message(s) representing tool results, in whatever
+        shape this provider's API expects them fed back as (a single
+        multi-block message for Anthropic, one message per call for
+        OpenAI-shaped APIs — hence a list, not one `Message`). `results` maps
+        `ToolCall.id` to that call's JSON-serializable result."""
+
 
 class AnthropicProvider(LLMProvider):
     name = "anthropic"
@@ -89,6 +137,65 @@ class AnthropicProvider(LLMProvider):
                 input_tokens=final_message.usage.input_tokens,
                 output_tokens=final_message.usage.output_tokens,
             )
+
+    async def complete_with_tools(
+        self,
+        system: str,
+        messages: list[Message],
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec],
+    ) -> ToolCompletionResult:
+        anthropic_tools = [
+            {"name": tool.name, "description": tool.description, "input_schema": tool.parameters}
+            for tool in tools
+        ]
+        response = await self._client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=cast("list[AnthropicMessageParam]", messages),
+            tools=anthropic_tools,  # type: ignore[arg-type]
+        )
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for block in response.content:
+            if block.type == "text":
+                text_parts.append(block.text)
+            elif block.type == "tool_use":
+                tool_calls.append(
+                    ToolCall(
+                        id=block.id, name=block.name, arguments=cast("dict[str, Any]", block.input)
+                    )
+                )
+        return ToolCompletionResult(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            assistant_message={
+                "role": "assistant",
+                "content": [block.model_dump() for block in response.content],
+            },
+            usage=UsageInfo(
+                input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens
+            ),
+        )
+
+    def tool_result_messages(
+        self, tool_calls: list[ToolCall], results: dict[str, dict[str, Any]]
+    ) -> list[Message]:
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": call.id,
+                        "content": json.dumps(results[call.id]),
+                    }
+                    for call in tool_calls
+                ],
+            }
+        ]
 
 
 class OpenAIProvider(LLMProvider):
@@ -127,6 +234,65 @@ class OpenAIProvider(LLMProvider):
             if chunk.choices and chunk.choices[0].delta.content:
                 yield TextDelta(chunk.choices[0].delta.content)
         yield UsageInfo(input_tokens=input_tokens, output_tokens=output_tokens)
+
+    async def complete_with_tools(
+        self,
+        system: str,
+        messages: list[Message],
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec],
+    ) -> ToolCompletionResult:
+        openai_messages = [{"role": "system", "content": system}, *messages]
+        openai_tools: list[dict[str, Any]] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            }
+            for tool in tools
+        ]
+        response = await self._client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=openai_messages,  # type: ignore[arg-type]
+            tools=openai_tools,  # type: ignore[arg-type]
+        )
+        choice = response.choices[0].message
+        # Only "function" tool calls are possible here — every tool advertised
+        # above is function-typed, so the SDK's "custom" tool-call variant
+        # (which lacks `.function`) never actually occurs in a response.
+        tool_calls = [
+            ToolCall(
+                id=call.id, name=call.function.name, arguments=json.loads(call.function.arguments)
+            )
+            for call in (choice.tool_calls or [])
+            if call.type == "function"
+        ]
+        assistant_message: Message = {"role": "assistant", "content": choice.content or ""}
+        if choice.tool_calls:
+            assistant_message["tool_calls"] = [call.model_dump() for call in choice.tool_calls]
+        usage = response.usage
+        return ToolCompletionResult(
+            text=choice.content or "",
+            tool_calls=tool_calls,
+            assistant_message=assistant_message,
+            usage=UsageInfo(
+                input_tokens=usage.prompt_tokens if usage else 0,
+                output_tokens=usage.completion_tokens if usage else 0,
+            ),
+        )
+
+    def tool_result_messages(
+        self, tool_calls: list[ToolCall], results: dict[str, dict[str, Any]]
+    ) -> list[Message]:
+        return [
+            {"role": "tool", "tool_call_id": call.id, "content": json.dumps(results[call.id])}
+            for call in tool_calls
+        ]
 
 
 class OllamaProvider(OpenAIProvider):

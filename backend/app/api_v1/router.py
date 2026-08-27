@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.modules.agents.router import router as agents_router
 from app.modules.ai.router import router as ai_router
 from app.modules.assistant.router import conversations_router
 from app.modules.assistant.router import router as assistant_router
@@ -18,3 +19,4 @@ router.include_router(search_router)
 router.include_router(assistant_router)
 router.include_router(conversations_router)
 router.include_router(ai_router)
+router.include_router(agents_router)

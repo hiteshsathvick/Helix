@@ -122,6 +122,22 @@ async def get_snippets(
     return {row.id: row.snippet for row in result.all()}
 
 
+async def get_document_content(db: AsyncSession, org_id: uuid.UUID, document_id: uuid.UUID) -> str:
+    """Full document text, reconstructed in chunk order — for the agents
+    module's `fetch_document` tool (Phase 12), which needs a whole
+    document's content rather than the individually-retrieved chunks
+    assistant queries (get_chunk_contents below) deal with.
+    """
+    await set_tenant_context(db, org_id)
+    stmt = (
+        select(Chunk.content)
+        .where(Chunk.org_id == org_id, Chunk.document_id == document_id)
+        .order_by(Chunk.ordinal)
+    )
+    result = await db.execute(stmt)
+    return "\n".join(result.scalars().all())
+
+
 async def get_chunk_contents(
     db: AsyncSession, org_id: uuid.UUID, chunk_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, str]:
