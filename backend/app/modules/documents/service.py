@@ -1,3 +1,4 @@
+import io
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -29,6 +30,82 @@ async def get_or_create_manual_source(db: AsyncSession, org_id: uuid.UUID) -> So
     db.add(source)
     await db.flush()
     return source
+
+
+async def create_source(
+    db: AsyncSession, org_id: uuid.UUID, source_type: str, name: str, config: dict
+) -> Source:
+    """Generic Source creation for connectors (Phase 14) — `source_type` is
+    e.g. "web"/"github", never "manual" (that's get_or_create_manual_source's
+    job). Source is this module's model; connectors calls this rather than
+    constructing a Source itself (CLAUDE.md §3)."""
+    await set_tenant_context(db, org_id)
+    source = Source(org_id=org_id, type=source_type, name=name, config=config)
+    db.add(source)
+    await db.commit()
+    await set_tenant_context(db, org_id)
+    await db.refresh(source)
+    return source
+
+
+async def list_connector_sources(db: AsyncSession, org_id: uuid.UUID) -> list[Source]:
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(Source).where(
+            Source.org_id == org_id, Source.type != "manual", Source.deleted_at.is_(None)
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_source(db: AsyncSession, org_id: uuid.UUID, source_id: uuid.UUID) -> Source:
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(Source).where(
+            Source.id == source_id, Source.org_id == org_id, Source.deleted_at.is_(None)
+        )
+    )
+    source = result.scalar_one_or_none()
+    if source is None:
+        raise NotFoundError("connector not found")
+    return source
+
+
+async def update_source(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    source_id: uuid.UUID,
+    *,
+    config: dict | None = None,
+    status: str | None = None,
+    last_synced_at: datetime | None = None,
+    last_sync_error: str | None = "__unset__",
+) -> Source:
+    """last_sync_error's default is a sentinel, not None, so callers can
+    explicitly clear it (pass None) on a successful sync without every
+    other caller needing to repeat that -- omitting the kwarg leaves it
+    untouched."""
+    source = await get_source(db, org_id, source_id)
+    if config is not None:
+        source.config = config
+    if status is not None:
+        source.status = status
+    if last_synced_at is not None:
+        source.last_synced_at = last_synced_at
+    if last_sync_error != "__unset__":
+        source.last_sync_error = last_sync_error
+    await db.commit()
+    await set_tenant_context(db, org_id)
+    await db.refresh(source)
+    return source
+
+
+async def delete_source(db: AsyncSession, org_id: uuid.UUID, source_id: uuid.UUID) -> None:
+    """Soft delete only -- previously-synced documents stay searchable,
+    matching delete_document's own reasoning."""
+    source = await get_source(db, org_id, source_id)
+    source.deleted_at = datetime.now(UTC)
+    await db.commit()
 
 
 async def upload_document(
@@ -77,6 +154,99 @@ async def upload_document(
     return document
 
 
+async def create_document_from_source(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    source_id: uuid.UUID,
+    external_id: str,
+    title: str,
+    mime: str,
+    content: bytes,
+    connected_by_user_id: uuid.UUID,
+    acl_principals: list[tuple[str, uuid.UUID]] | None = None,
+) -> Document:
+    """The connector-sync equivalent of upload_document: content already
+    fetched (not an UploadFile), a specific source_id/external_id rather
+    than the manual source, and caller-supplied ACL principals rather than
+    an always-org-wide default. Used by app/modules/connectors/service.py's
+    sync loop for a newly-discovered item; see update_document_content for
+    an existing item whose content changed.
+    """
+    await set_tenant_context(db, org_id)
+    document_id = uuid.uuid4()
+    # Unlike upload_document's filename-derived key, `title` here can be
+    # anything a connector produced -- a full URL for the web connector,
+    # a repo path for GitHub -- and isn't safe to embed directly in an S3
+    # object key (MinIO rejects e.g. "://" in a key).
+    storage_key = f"{org_id}/{document_id}"
+    checksum = await upload_object(io.BytesIO(content), storage_key)
+
+    document = Document(
+        id=document_id,
+        org_id=org_id,
+        source_id=source_id,
+        external_id=external_id,
+        title=title,
+        mime=mime,
+        storage_key=storage_key,
+        checksum=checksum,
+        uploaded_by_user_id=connected_by_user_id,
+    )
+    db.add(document)
+    await db.flush()
+
+    for principal_type, principal_id in acl_principals or [("org", org_id)]:
+        db.add(
+            DocumentACL(
+                org_id=org_id,
+                document_id=document.id,
+                principal_type=principal_type,
+                principal_id=principal_id,
+            )
+        )
+
+    await db.commit()
+    await set_tenant_context(db, org_id)
+    await db.refresh(document)
+    logger.info(
+        "document created from source: %s (source=%s external_id=%r)",
+        document.id,
+        source_id,
+        external_id,
+    )
+
+    await ingestion_service.trigger_ingestion(db, org_id, document.id)
+    return document
+
+
+async def update_document_content(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    document_id: uuid.UUID,
+    title: str,
+    mime: str,
+    content: bytes,
+) -> Document:
+    """A connector-sync found the same external_id with different content --
+    re-upload, update the pointer/checksum/title, and re-trigger ingestion
+    (which replaces the document's existing chunks, see
+    ingestion/pipeline.py::run_ingestion's docstring)."""
+    document = await get_document(db, org_id, document_id)
+    storage_key = f"{org_id}/{document_id}"  # see create_document_from_source's identical note
+    checksum = await upload_object(io.BytesIO(content), storage_key)
+
+    document.title = title
+    document.mime = mime
+    document.storage_key = storage_key
+    document.checksum = checksum
+    await db.commit()
+    await set_tenant_context(db, org_id)
+    await db.refresh(document)
+
+    await ingestion_service.trigger_ingestion(db, org_id, document.id)
+    return document
+
+
 async def list_documents(db: AsyncSession, org_id: uuid.UUID) -> list[Document]:
     result = await db.execute(
         select(Document)
@@ -102,6 +272,42 @@ async def get_document(db: AsyncSession, org_id: uuid.UUID, document_id: uuid.UU
     if document is None:
         raise NotFoundError("document not found")
     return document
+
+
+async def get_document_by_external_id(
+    db: AsyncSession, org_id: uuid.UUID, source_id: uuid.UUID, external_id: str
+) -> Document | None:
+    """The dedup lookup a connector sync (Phase 14) uses to decide
+    create-vs-update-vs-skip for one ChangeItem — see
+    app/modules/connectors/service.py's sync loop."""
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(Document).where(
+            Document.org_id == org_id,
+            Document.source_id == source_id,
+            Document.external_id == external_id,
+            Document.deleted_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_documents_by_source(
+    db: AsyncSession, org_id: uuid.UUID, source_id: uuid.UUID
+) -> list[Document]:
+    """Every non-deleted document a connector has previously synced for one
+    source -- a sync compares this set's external_ids against the current
+    upstream listing to detect items deleted upstream (see
+    connectors/service.py)."""
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(Document).where(
+            Document.org_id == org_id,
+            Document.source_id == source_id,
+            Document.deleted_at.is_(None),
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def delete_document(db: AsyncSession, org_id: uuid.UUID, document_id: uuid.UUID) -> None:

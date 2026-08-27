@@ -63,6 +63,18 @@ async def enqueue_workflow_run_deferred(
         await pool.aclose()
 
 
+async def enqueue_connector_sync(source_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """A manual sync trigger (connectors/router.py) or the periodic sweep
+    (connectors/tasks.py::sweep_connector_syncs_task) both funnel through
+    here."""
+    settings = get_settings()
+    pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        await pool.enqueue_job("sync_connector_task", str(source_id), str(org_id))
+    finally:
+        await pool.aclose()
+
+
 async def enqueue_agent_run(run_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID) -> None:
     """SPEC.md §22 puts agent execution on its own queue, separate from
     ingestion — a tool-calling loop can take many seconds (multiple LLM

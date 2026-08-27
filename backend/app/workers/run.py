@@ -6,6 +6,7 @@ too.
 
 from arq import func as arq_func
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -24,6 +25,7 @@ from app.modules.agents import models as agents_models  # noqa: F401
 from app.modules.agents.tasks import run_agent_task
 from app.modules.assistant import models as assistant_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
+from app.modules.connectors.tasks import sweep_connector_syncs_task, sync_connector_task
 from app.modules.documents import models as documents_models  # noqa: F401
 from app.modules.events import models as events_models  # noqa: F401
 from app.modules.ingestion import models as ingestion_models  # noqa: F401
@@ -43,5 +45,16 @@ class WorkerSettings:
         arq_func(run_agent_task, max_tries=_settings.agent_max_job_attempts),
         arq_func(execute_workflow_run_task, max_tries=_settings.workflow_run_max_job_attempts),
         arq_func(dispatch_domain_event_task, max_tries=3),
+        arq_func(sync_connector_task, max_tries=_settings.connector_sync_max_job_attempts),
+    ]
+    # A fixed, platform-wide periodic sweep (SPEC.md §26 "connectors run
+    # incremental syncs on a schedule") -- not a per-item dynamic schedule,
+    # which is exactly the case Phase 13 deliberately left for Arq's own
+    # static cron support rather than adding a new dependency.
+    cron_jobs = [
+        cron(
+            sweep_connector_syncs_task,
+            minute=set(range(0, 60, _settings.connector_sync_interval_minutes)),
+        )
     ]
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)

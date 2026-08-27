@@ -46,6 +46,16 @@ async def get_organization(db: AsyncSession, org_id: uuid.UUID) -> Organization:
     return org
 
 
+async def list_all_org_ids(db: AsyncSession) -> list[uuid.UUID]:
+    """Every non-deleted org, for a platform-wide periodic sweep (Phase 14's
+    connector sync cron, see connectors/tasks.py) rather than a per-org
+    request. `organizations` carries no org_id of its own to scope by and
+    has no RLS policy (Role's docstring notes the same for a similar
+    reason) -- no set_tenant_context call needed here."""
+    result = await db.execute(select(Organization.id).where(Organization.deleted_at.is_(None)))
+    return list(result.scalars().all())
+
+
 async def get_org_settings(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
     """Public read of `organizations.settings` for other modules (e.g. `ai`
     resolving per-org model config) — CLAUDE.md §3: cross-module access goes

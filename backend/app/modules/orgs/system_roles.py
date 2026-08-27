@@ -18,6 +18,7 @@ PERMISSION_AGENTS_MANAGE = "agents:manage"
 PERMISSION_AGENTS_RUN = "agents:run"
 PERMISSION_WORKFLOWS_MANAGE = "workflows:manage"
 PERMISSION_WORKFLOWS_RUN = "workflows:run"
+PERMISSION_CONNECTORS_MANAGE = "connectors:manage"
 
 # Owner and Admin are identical today — SPEC.md §14 requires each
 # permission to be listed explicitly rather than an implicit bypass, and
@@ -35,6 +36,12 @@ _FULL_PERMISSIONS = [
     PERMISSION_AGENTS_RUN,
     PERMISSION_WORKFLOWS_MANAGE,
     PERMISSION_WORKFLOWS_RUN,
+    # Connectors, unlike agents/workflows, get one tier only (see Phase 14
+    # plan §6): a sync touches OAuth credentials and external ingestion, a
+    # materially different trust level than running someone else's agent
+    # or workflow, and there's no legitimate "wants to sync but not
+    # configure" persona -- Owner/Admin only, not Member.
+    PERMISSION_CONNECTORS_MANAGE,
 ]
 _MEMBER_PERMISSIONS = [
     PERMISSION_MEMBERS_READ,

@@ -5,6 +5,8 @@ from app.modules.ai.router import router as ai_router
 from app.modules.assistant.router import conversations_router
 from app.modules.assistant.router import router as assistant_router
 from app.modules.auth.router import router as auth_router
+from app.modules.connectors.router import oauth_router as connectors_oauth_router
+from app.modules.connectors.router import router as connectors_router
 from app.modules.documents.router import router as documents_router
 from app.modules.orgs.router import invitations_router
 from app.modules.orgs.router import router as orgs_router
@@ -24,3 +26,5 @@ router.include_router(ai_router)
 router.include_router(agents_router)
 router.include_router(workflows_router)
 router.include_router(workflows_webhooks_router)
+router.include_router(connectors_router)
+router.include_router(connectors_oauth_router)

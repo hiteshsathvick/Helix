@@ -93,6 +93,27 @@ class Settings(BaseSettings):
     workflow_run_max_job_attempts: int = 3
     workflow_ai_node_max_tool_rounds: int = 4
 
+    # Connector framework (SPEC.md §26). connector_encryption_key must be a
+    # valid Fernet key (Fernet.generate_key(), base64-encoded 32 bytes) --
+    # never reuse the local-dev default outside local dev, same warning as
+    # jwt_signing_keys above.
+    connector_encryption_key: str = "THs3h55oNt0505SRw1YgPLKE0TlCB_fkSaxjfmg51GM="
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_redirect_url: str = "http://localhost:8000/api/v1/oauth/github/callback"
+    connector_sync_interval_minutes: int = 15
+    connector_sync_max_job_attempts: int = 3
+    # Default-deny (SPEC.md §29), same posture as agent_http_allowlist but a
+    # deliberately separate setting -- a connector's URL list is an
+    # admin-authored, out-of-band decision at connect time, not something a
+    # possibly-prompt-injected agent tool call can steer, so it legitimately
+    # warrants a different (often broader) set of allowed hosts.
+    connector_web_allowlist: list[str] = []
+    # Where the GitHub OAuth callback redirects the browser back to once a
+    # connector is connected -- matches CORSMiddleware's allowed origin in
+    # app/main.py.
+    frontend_url: str = "http://localhost:3000"
+
 
 @lru_cache
 def get_settings() -> Settings:
