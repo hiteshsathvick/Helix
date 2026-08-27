@@ -87,3 +87,15 @@ async def enqueue_agent_run(run_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid
         await pool.enqueue_job("run_agent_task", str(run_id), str(org_id), str(agent_id))
     finally:
         await pool.aclose()
+
+
+async def enqueue_notification_send(notification_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """An immediate-frequency email notification (notifications/service.py
+    ::notify) enqueues here right after being created — never sent inline
+    in the request/task that triggered it (SPEC.md §23)."""
+    settings = get_settings()
+    pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        await pool.enqueue_job("send_notification_task", str(notification_id), str(org_id))
+    finally:
+        await pool.aclose()

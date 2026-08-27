@@ -30,6 +30,8 @@ from app.modules.documents import models as documents_models  # noqa: F401
 from app.modules.events import models as events_models  # noqa: F401
 from app.modules.ingestion import models as ingestion_models  # noqa: F401
 from app.modules.ingestion.tasks import ingest_document_task
+from app.modules.notifications import models as notifications_models  # noqa: F401
+from app.modules.notifications.tasks import send_digest_task, send_notification_task
 from app.modules.orgs import models as orgs_models  # noqa: F401
 from app.modules.workflows import models as workflows_models  # noqa: F401
 from app.modules.workflows.tasks import dispatch_domain_event_task, execute_workflow_run_task
@@ -46,15 +48,17 @@ class WorkerSettings:
         arq_func(execute_workflow_run_task, max_tries=_settings.workflow_run_max_job_attempts),
         arq_func(dispatch_domain_event_task, max_tries=3),
         arq_func(sync_connector_task, max_tries=_settings.connector_sync_max_job_attempts),
+        arq_func(send_notification_task, max_tries=_settings.notification_max_job_attempts),
     ]
-    # A fixed, platform-wide periodic sweep (SPEC.md §26 "connectors run
-    # incremental syncs on a schedule") -- not a per-item dynamic schedule,
-    # which is exactly the case Phase 13 deliberately left for Arq's own
-    # static cron support rather than adding a new dependency.
+    # Fixed, platform-wide periodic sweeps (SPEC.md §26 connector syncs,
+    # §23 notification digests) -- not per-item dynamic schedules, which
+    # is exactly the case Phase 13 deliberately left for Arq's own static
+    # cron support rather than adding a new dependency.
     cron_jobs = [
         cron(
             sweep_connector_syncs_task,
             minute=set(range(0, 60, _settings.connector_sync_interval_minutes)),
-        )
+        ),
+        cron(send_digest_task, hour={_settings.notification_digest_hour}, minute={0}),
     ]
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)

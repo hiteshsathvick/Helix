@@ -43,6 +43,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link href={`/orgs/${activeOrgId}/workflows`} className="underline">
                 Workflows
               </Link>
+              <Link href={`/orgs/${activeOrgId}/notifications`} className="underline">
+                Notifications
+              </Link>
               <Link href={`/orgs/${activeOrgId}/members`} className="underline">
                 Members
               </Link>

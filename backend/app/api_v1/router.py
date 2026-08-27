@@ -8,6 +8,8 @@ from app.modules.auth.router import router as auth_router
 from app.modules.connectors.router import oauth_router as connectors_oauth_router
 from app.modules.connectors.router import router as connectors_router
 from app.modules.documents.router import router as documents_router
+from app.modules.notifications.router import prefs_router as notification_prefs_router
+from app.modules.notifications.router import router as notifications_router
 from app.modules.orgs.router import invitations_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.search.router import router as search_router
@@ -28,3 +30,5 @@ router.include_router(workflows_router)
 router.include_router(workflows_webhooks_router)
 router.include_router(connectors_router)
 router.include_router(connectors_oauth_router)
+router.include_router(notifications_router)
+router.include_router(notification_prefs_router)

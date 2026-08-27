@@ -17,6 +17,7 @@ from app.core.errors import ConflictError, NotFoundError, QuotaExceededError
 from app.modules.ai.providers import ToolSpec
 from app.modules.documents import service as documents_service
 from app.modules.ingestion import service as ingestion_service
+from app.modules.notifications import service as notifications_service
 from app.modules.search import service as search_service
 
 logger = logging.getLogger("helix.agents")
@@ -112,17 +113,31 @@ async def _http_request_handler(ctx: ToolContext, args: dict[str, Any]) -> dict[
 
 
 async def _notify_handler(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    # Traced no-op: real delivery is the `notifications` module, still a
-    # Phase 15 stub. This records the intended notification (the
-    # agent_steps row already persists this call's input/output) without
-    # delivering it anywhere — never mistake a successful `notify` step for
-    # an actually-sent notification before Phase 15 lands.
-    logger.info("notify tool called (not delivered — Phase 15): %r", args)
-    return {
-        "status": "recorded_not_delivered",
-        "channel": args.get("channel"),
-        "message": args.get("message"),
-    }
+    # Real delivery via the notifications module (Phase 15) -- fans out to
+    # whichever channel(s) the recipient has enabled, per their own
+    # preferences. No "channel" arg: a caller-supplied channel would let a
+    # run bypass the recipient's preferences, which SPEC.md §23 explicitly
+    # requires be respected.
+    raw_user_id = args.get("user_id")
+    try:
+        recipient_id = uuid.UUID(str(raw_user_id)) if raw_user_id else ctx.user_id
+    except ValueError:
+        return {"error": f"{raw_user_id!r} is not a valid user_id"}
+
+    message = str(args.get("message", ""))
+    subject = str(args.get("subject") or (message[:80] + ("…" if len(message) > 80 else "")))
+
+    try:
+        notifications = await notifications_service.notify(
+            ctx.db,
+            ctx.org_id,
+            recipient_id,
+            event_type="notify.manual",
+            payload={"subject": subject, "message": message},
+        )
+    except NotFoundError as exc:
+        return {"error": str(exc)}
+    return {"status": "queued", "notification_ids": [str(n.id) for n in notifications]}
 
 
 async def _run_workflow_handler(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -202,16 +217,30 @@ TOOLS: dict[str, Tool] = {
         spec=ToolSpec(
             name="notify",
             description=(
-                "Record an intended notification for a channel and message. Does not "
-                "deliver it anywhere yet."
+                "Send a notification to a user. Delivered on whichever channel(s) (email, "
+                "in-app) the recipient has enabled for this kind of notification -- you "
+                "cannot force a specific channel."
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "channel": {"type": "string"},
-                    "message": {"type": "string"},
+                    "message": {"type": "string", "description": "The notification body."},
+                    "subject": {
+                        "type": "string",
+                        "description": (
+                            "Optional subject/title for email delivery; derived from "
+                            "message if omitted."
+                        ),
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional recipient org member id. Defaults to the user "
+                            "who triggered this run."
+                        ),
+                    },
                 },
-                "required": ["channel", "message"],
+                "required": ["message"],
             },
         ),
         handler=_notify_handler,

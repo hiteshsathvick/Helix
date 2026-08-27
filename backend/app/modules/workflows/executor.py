@@ -229,6 +229,8 @@ async def _execute_node(
         elif node.type == "notify":
             args = resolve_refs(node.config, run.context)
             output = await TOOLS["notify"].handler(ToolContext(db, org_id, acting_user_id), args)
+            if "error" in output:
+                raise RuntimeError(str(output["error"]))
         elif node.type == "action":
             tool_name = node.config["tool"]
             args = resolve_refs(node.config.get("args", {}), run.context)

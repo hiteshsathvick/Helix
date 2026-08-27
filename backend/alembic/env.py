@@ -13,6 +13,7 @@ from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401
 from app.modules.events import models as events_models  # noqa: F401
 from app.modules.ingestion import models as ingestion_models  # noqa: F401
+from app.modules.notifications import models as notifications_models  # noqa: F401
 from app.modules.orgs import models as orgs_models  # noqa: F401
 from app.modules.workflows import models as workflows_models  # noqa: F401
 

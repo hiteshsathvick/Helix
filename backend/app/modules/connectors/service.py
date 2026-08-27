@@ -17,6 +17,7 @@ from app.modules.connectors.registry import CONNECTORS
 from app.modules.connectors.web import validate_urls
 from app.modules.documents import service as documents_service
 from app.modules.documents.models import Source
+from app.modules.notifications import service as notifications_service
 
 logger = logging.getLogger("helix.connectors")
 
@@ -199,5 +200,16 @@ async def run_sync(db: AsyncSession, org_id: uuid.UUID, source_id: uuid.UUID) ->
         logger.exception("connector sync failed: source=%s", source_id)
         await documents_service.update_source(
             db, org_id, source_id, status="error", last_sync_error=str(exc)
+        )
+        # The one real system-notification producer this phase wires up
+        # (Phase 15) -- notify whoever connected the source, since a
+        # failed sync otherwise has zero user-facing signal beyond a DB
+        # column nobody's watching.
+        await notifications_service.notify(
+            db,
+            org_id,
+            connected_by_user_id,
+            event_type="connector.sync_failed",
+            payload={"source_name": source.name, "error": str(exc)},
         )
         raise

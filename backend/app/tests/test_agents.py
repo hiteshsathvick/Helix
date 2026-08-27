@@ -118,13 +118,32 @@ async def _run_synchronously(org_id: str, run_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_notify_tool_records_but_does_not_deliver() -> None:
+async def test_notify_tool_delivers_per_recipient_preferences(client: TestClient) -> None:
+    # Phase 15: the notify tool delivers for real via the notifications
+    # module, fanning out across whichever channels the recipient (the
+    # user who triggered the run, by default) has enabled.
+    token, org_id = _register_login_and_create_org(client)
+    user_id = uuid.UUID(client.get(f"{AUTH_PREFIX}/me", headers=_auth_headers(token)).json()["id"])
+
+    async with session_factory() as db:
+        ctx = ToolContext(db=db, org_id=uuid.UUID(org_id), user_id=user_id)
+        result = await TOOLS["notify"].handler(ctx, {"message": "hi"})
+
+    assert result["status"] == "queued"
+    assert len(result["notification_ids"]) == 2  # email + in_app, both enabled by default
+
+    inbox = client.get(f"{ORGS_PREFIX}/{org_id}/notifications", headers=_auth_headers(token)).json()
+    assert any(n["body"] == "hi" for n in inbox["results"])
+
+
+@pytest.mark.asyncio
+async def test_notify_tool_returns_error_for_non_member_recipient() -> None:
     org_id, user_id = uuid.uuid4(), uuid.uuid4()
     async with session_factory() as db:
         ctx = ToolContext(db=db, org_id=org_id, user_id=user_id)
-        result = await TOOLS["notify"].handler(ctx, {"channel": "email", "message": "hi"})
+        result = await TOOLS["notify"].handler(ctx, {"message": "hi"})
 
-    assert result == {"status": "recorded_not_delivered", "channel": "email", "message": "hi"}
+    assert "error" in result
 
 
 @pytest.mark.asyncio
@@ -343,7 +362,7 @@ async def test_run_calls_allowed_tool_then_completes(client: TestClient, monkeyp
     step_types = [step["type"] for step in detail["steps"]]
     assert step_types == ["tool_call", "final_answer"]
     assert detail["steps"][0]["tool"] == "notify"
-    assert detail["steps"][0]["output"]["status"] == "recorded_not_delivered"
+    assert detail["steps"][0]["output"]["status"] == "queued"
 
 
 @pytest.mark.asyncio

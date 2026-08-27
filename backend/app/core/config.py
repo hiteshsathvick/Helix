@@ -114,6 +114,21 @@ class Settings(BaseSettings):
     # app/main.py.
     frontend_url: str = "http://localhost:3000"
 
+    # Notifications (SPEC.md §23). Defaults point at the local Mailpit
+    # dev-catcher (docker-compose.yml) -- no account or cost needed for
+    # local dev/testing; point these at a real provider's SMTP relay
+    # (SendGrid/Postmark/SES/Resend all expose one) for a live deployment,
+    # no code change required.
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = False
+    smtp_from_address: str = "notifications@helix.local"
+    notification_max_job_attempts: int = 3
+    # UTC hour the daily digest sweep runs at.
+    notification_digest_hour: int = 9
+
 
 @lru_cache
 def get_settings() -> Settings:
