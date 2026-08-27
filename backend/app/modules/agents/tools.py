@@ -1,9 +1,6 @@
 """Tool registry (SPEC.md §19). Each tool wraps an existing service
 function — no new business logic, just a name + JSON schema + handler the
 agent loop can call by name.
-
-`run_workflow` from SPEC.md §19's full built-in tool list is deliberately
-absent — workflows don't exist until Phase 13.
 """
 
 import logging
@@ -16,7 +13,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.errors import NotFoundError
+from app.core.errors import ConflictError, NotFoundError, QuotaExceededError
 from app.modules.ai.providers import ToolSpec
 from app.modules.documents import service as documents_service
 from app.modules.ingestion import service as ingestion_service
@@ -128,6 +125,33 @@ async def _notify_handler(ctx: ToolContext, args: dict[str, Any]) -> dict[str, A
     }
 
 
+async def _run_workflow_handler(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    # Deferred import: workflows/schemas.py imports this module (TOOLS) to
+    # validate action/ai node tool names, so a top-level import here would
+    # be circular. Importing inside the handler instead means the cycle
+    # never exists at module-load time, only at call time once both
+    # modules are already fully imported.
+    from app.modules.workflows import service as workflows_service
+
+    raw_id = str(args.get("workflow_id", ""))
+    try:
+        workflow_id = uuid.UUID(raw_id)
+    except ValueError:
+        return {"error": f"{raw_id!r} is not a valid workflow_id"}
+
+    try:
+        run = await workflows_service.create_run(
+            ctx.db,
+            ctx.org_id,
+            workflow_id,
+            {"type": "agent", "input": args.get("input", {})},
+            triggered_by_user_id=ctx.user_id,
+        )
+    except (NotFoundError, ConflictError, QuotaExceededError) as exc:
+        return {"error": str(exc)}
+    return {"run_id": str(run.id), "status": run.status}
+
+
 TOOLS: dict[str, Tool] = {
     "search": Tool(
         spec=ToolSpec(
@@ -191,5 +215,23 @@ TOOLS: dict[str, Tool] = {
             },
         ),
         handler=_notify_handler,
+    ),
+    "run_workflow": Tool(
+        spec=ToolSpec(
+            name="run_workflow",
+            description=(
+                "Trigger a run of an existing workflow by its id, optionally with input data. "
+                "Returns the new run's id and status; does not wait for it to finish."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "description": "The workflow's UUID."},
+                    "input": {"type": "object", "description": "Arbitrary input for the run."},
+                },
+                "required": ["workflow_id"],
+            },
+        ),
+        handler=_run_workflow_handler,
     ),
 }

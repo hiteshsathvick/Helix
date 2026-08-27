@@ -9,6 +9,8 @@ from app.modules.documents.router import router as documents_router
 from app.modules.orgs.router import invitations_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.search.router import router as search_router
+from app.modules.workflows.router import router as workflows_router
+from app.modules.workflows.router import webhooks_router as workflows_webhooks_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -20,3 +22,5 @@ router.include_router(assistant_router)
 router.include_router(conversations_router)
 router.include_router(ai_router)
 router.include_router(agents_router)
+router.include_router(workflows_router)
+router.include_router(workflows_webhooks_router)

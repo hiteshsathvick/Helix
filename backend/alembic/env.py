@@ -11,8 +11,10 @@ from app.modules.agents import models as agents_models  # noqa: F401
 from app.modules.assistant import models as assistant_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401
+from app.modules.events import models as events_models  # noqa: F401
 from app.modules.ingestion import models as ingestion_models  # noqa: F401
 from app.modules.orgs import models as orgs_models  # noqa: F401
+from app.modules.workflows import models as workflows_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

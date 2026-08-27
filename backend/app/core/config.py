@@ -80,6 +80,19 @@ class Settings(BaseSettings):
     # every host until explicit hostnames are added here.
     agent_http_allowlist: list[str] = []
 
+    # Workflow engine guardrails (SPEC.md §20) -- hard-enforced in code, same
+    # philosophy as the agent_* settings above. workflow_run_max_job_attempts
+    # is intentionally > 1 (unlike agent_max_job_attempts): the executor is
+    # explicitly designed to be safely resumable from persisted StepRun
+    # state (see workflows/executor.py), so letting Arq retry a crashed
+    # worker's run is the whole point, not a risk to avoid.
+    workflow_step_max_attempts: int = 3
+    workflow_step_backoff_base_seconds: int = 5  # attempt N waits base * 2**(N-1): 5s, 10s, 20s
+    workflow_run_max_steps: int = 50
+    workflow_run_timeout_seconds: int = 600
+    workflow_run_max_job_attempts: int = 3
+    workflow_ai_node_max_tool_rounds: int = 4
+
 
 @lru_cache
 def get_settings() -> Settings:

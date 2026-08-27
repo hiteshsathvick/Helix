@@ -25,9 +25,12 @@ from app.modules.agents.tasks import run_agent_task
 from app.modules.assistant import models as assistant_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401
+from app.modules.events import models as events_models  # noqa: F401
 from app.modules.ingestion import models as ingestion_models  # noqa: F401
 from app.modules.ingestion.tasks import ingest_document_task
 from app.modules.orgs import models as orgs_models  # noqa: F401
+from app.modules.workflows import models as workflows_models  # noqa: F401
+from app.modules.workflows.tasks import dispatch_domain_event_task, execute_workflow_run_task
 
 configure_logging()
 
@@ -38,5 +41,7 @@ class WorkerSettings:
     functions = [
         arq_func(ingest_document_task, max_tries=_settings.ingestion_max_job_attempts),
         arq_func(run_agent_task, max_tries=_settings.agent_max_job_attempts),
+        arq_func(execute_workflow_run_task, max_tries=_settings.workflow_run_max_job_attempts),
+        arq_func(dispatch_domain_event_task, max_tries=3),
     ]
     redis_settings = RedisSettings.from_dsn(_settings.redis_url)

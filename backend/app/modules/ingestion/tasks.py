@@ -4,6 +4,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.db import session_factory
+from app.core.events import publish_event
 from app.core.tenancy import set_tenant_context
 from app.modules.documents import service as documents_service
 from app.modules.ingestion.models import Job
@@ -54,6 +55,20 @@ async def ingest_document_task(
             if job is not None:
                 job.status = "succeeded"
                 job.error = None
+                # Publishes the event this task just made true and enqueues
+                # its dispatch to any workflow triggers (app/core/events.py)
+                # — SPEC.md §44's own worked example ("trigger = new
+                # document ... → step summarize"). Fired here, not from
+                # ingestion/service.py (that fires at job *creation*, before
+                # ingestion has even run) or pipeline.py (which only knows
+                # chunking succeeded, not that the whole task did).
+                await publish_event(
+                    db,
+                    org_uuid,
+                    "document.ingested",
+                    {"document_id": document_id},
+                    correlation_id=job_uuid,
+                )
                 await db.commit()
 
     except Exception as exc:
