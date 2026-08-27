@@ -66,6 +66,9 @@ async def query_assistant(
     conversation = await service.resolve_conversation(
         db, org_id, current_user.id, request.conversation_id, request.query
     )
+    # Also resolved and enforced before the stream opens, for the same
+    # reason as resolve_conversation: see service.assert_within_cost_cap.
+    await service.assert_within_cost_cap(db, org_id)
     return StreamingResponse(
         _sse_events(org_id, current_user.id, conversation.id, request.query),
         media_type="text/event-stream",

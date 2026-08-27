@@ -13,6 +13,7 @@ PERMISSION_MEMBERS_MANAGE = "members:manage"
 PERMISSION_ROLES_MANAGE = "roles:manage"
 PERMISSION_DOCUMENTS_READ = "documents:read"
 PERMISSION_DOCUMENTS_WRITE = "documents:write"
+PERMISSION_AI_CONFIG_MANAGE = "ai:manage"
 
 # Owner and Admin are identical today — SPEC.md §14 requires each
 # permission to be listed explicitly rather than an implicit bypass, and
@@ -25,6 +26,7 @@ _FULL_PERMISSIONS = [
     PERMISSION_ROLES_MANAGE,
     PERMISSION_DOCUMENTS_READ,
     PERMISSION_DOCUMENTS_WRITE,
+    PERMISSION_AI_CONFIG_MANAGE,
 ]
 _MEMBER_PERMISSIONS = [
     PERMISSION_MEMBERS_READ,

@@ -24,6 +24,7 @@ dependencies = [
     "beautifulsoup4>=4.12,<5",
     "tiktoken>=0.7,<0.8",
     "anthropic>=0.40,<1",
+    "openai>=1.50,<2",
 ]
 
 [project.optional-dependencies]

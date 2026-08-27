@@ -32,7 +32,7 @@ def client():
         yield test_client
 
 
-async def _fake_stream_completion(system, messages, max_tokens):
+async def _fake_stream_completion(system, messages, max_tokens, *, provider=None, model=None):
     yield ai_service.TextDelta("Test answer ")
     yield ai_service.TextDelta("from mock.")
     yield ai_service.UsageInfo(input_tokens=100, output_tokens=20)

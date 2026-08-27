@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import FastAPI, status
@@ -60,6 +61,11 @@ class PayloadTooLargeError(HelixError):
     status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
 
 
+class QuotaExceededError(HelixError):
+    code = "quota_exceeded"
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+
+
 def _envelope(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
@@ -72,12 +78,23 @@ async def helix_error_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+def _json_safe_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
+    """Pydantic v2 embeds the raised exception itself in each error's `ctx`
+    (e.g. `ctx: {"error": ValueError("...")}` for a `field_validator` that
+    raises `ValueError`) — never JSON-serializable, and `msg` already carries
+    the same human-readable text, so `ctx` is dropped rather than encoded.
+    """
+    return [{k: v for k, v in dict(error).items() if k != "ctx"} for error in errors]
+
+
 async def validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, RequestValidationError)
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=_envelope(
-            "validation_error", "Request validation failed", {"errors": exc.errors()}
+            "validation_error",
+            "Request validation failed",
+            {"errors": _json_safe_errors(exc.errors())},
         ),
     )
 

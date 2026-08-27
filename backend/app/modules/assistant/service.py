@@ -3,19 +3,18 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import cast
 
 import tiktoken
-from anthropic.types import MessageParam
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from app.core.tenancy import set_tenant_context
+from app.modules.ai import cost_guard
 from app.modules.ai import service as ai_service
+from app.modules.ai.prompts import ASSISTANT_SYSTEM_PROMPT_CURRENT, NO_CONTEXT_PLACEHOLDER
 from app.modules.assistant.models import Conversation, Message
-from app.modules.assistant.prompts import NO_CONTEXT_PLACEHOLDER, SYSTEM_PROMPT_TEMPLATE
 from app.modules.assistant.schemas import Citation
 from app.modules.ingestion import service as ingestion_service
 from app.modules.search import service as search_service
@@ -115,6 +114,28 @@ async def _get_history(
     return list(reversed(result.scalars().all()))
 
 
+async def _get_monthly_spend(db: AsyncSession, org_id: uuid.UUID) -> float:
+    month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    result = await db.execute(
+        select(func.coalesce(func.sum(Message.cost), 0.0)).where(
+            Message.org_id == org_id, Message.created_at >= month_start
+        )
+    )
+    return float(result.scalar_one())
+
+
+async def assert_within_cost_cap(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Called by the router *before* opening the SSE stream — same reasoning
+    as `resolve_conversation` above: a `QuotaExceededError` raised from
+    inside the streaming generator would land after the 200 status and
+    headers are already committed, and couldn't become a clean 402 at all.
+    """
+    await set_tenant_context(db, org_id)
+    ai_config = await ai_service.resolve_org_ai_config(db, org_id)
+    spent = await _get_monthly_spend(db, org_id)
+    cost_guard.enforce_cost_cap(spent, ai_config.monthly_cost_cap_usd)
+
+
 async def query(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -124,6 +145,8 @@ async def query(
 ) -> AsyncIterator[AnswerToken | AnswerDone]:
     settings = get_settings()
     await set_tenant_context(db, org_id)
+
+    ai_config = await ai_service.resolve_org_ai_config(db, org_id)
 
     # Retrieve: reuse Phase 8 as-is, so ACL-aware filtering applies for
     # free — this is the only place document content enters the prompt.
@@ -155,20 +178,18 @@ async def query(
     history = await _get_history(
         db, org_id, conversation_id, settings.assistant_max_history_messages
     )
-    # Message.role is typed as plain str (SQLAlchemy has no narrower column
-    # type), but this module only ever writes "user"/"assistant" to it —
-    # the cast just tells mypy what our own invariant already guarantees.
-    llm_messages = cast(
-        "list[MessageParam]",
-        [{"role": message.role, "content": message.content} for message in history],
-    )
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context)
+    llm_messages = [{"role": message.role, "content": message.content} for message in history]
+    system_prompt = ASSISTANT_SYSTEM_PROMPT_CURRENT.render(context=context)
 
     full_text = ""
     input_tokens = 0
     output_tokens = 0
     async for event in ai_service.stream_completion(
-        system_prompt, llm_messages, settings.assistant_max_output_tokens
+        system_prompt,
+        llm_messages,
+        settings.assistant_max_output_tokens,
+        provider=ai_config.provider,
+        model=ai_config.model,
     ):
         if isinstance(event, ai_service.TextDelta):
             full_text += event.text
@@ -186,7 +207,7 @@ async def query(
         )
         for result in used_results
     ]
-    cost = ai_service.compute_cost(settings.llm_model, input_tokens, output_tokens)
+    cost = ai_service.compute_cost(ai_config.model, input_tokens, output_tokens)
 
     await set_tenant_context(db, org_id)
     assistant_message = Message(

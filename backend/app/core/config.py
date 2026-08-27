@@ -40,11 +40,25 @@ class Settings(BaseSettings):
     ingestion_chunk_overlap_tokens: int = 100
     ingestion_max_job_attempts: int = 3
 
-    # Phase 11 replaces this with the real swappable multi-provider
-    # abstraction (SPEC.md §17); for now the assistant needs *some* LLM
-    # call, wired to exactly one provider.
+    # Global default provider/model (SPEC.md §17). An org can override both
+    # via PUT /orgs/{id}/ai-config (app/modules/ai) — these are just the
+    # fallback when an org hasn't set its own.
+    ai_default_provider: str = "anthropic"
     anthropic_api_key: str = ""
     llm_model: str = "claude-sonnet-5"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    # Ollama's local server speaks the OpenAI-compatible Chat Completions
+    # API, so OpenAIProvider (app/modules/ai/providers.py) is reused against
+    # this base_url instead of adding a second SDK.
+    ollama_base_url: str = "http://host.docker.internal:11434/v1"
+    ollama_model: str = "llama3.1"
+    # None = unlimited. An org can set a stricter cap via its ai-config;
+    # this is only the fallback for orgs that haven't (SPEC.md §17
+    # "cost/limit guard"). This is a lightweight spend guard against
+    # `messages.cost`, not the real metering system — that's usage_events
+    # (Phase 27) and billing/subscriptions (Phase 16), which don't exist yet.
+    ai_default_monthly_cost_cap_usd: float | None = None
     assistant_top_k: int = 6
     assistant_context_token_budget: int = 3000
     assistant_max_output_tokens: int = 1024

@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,34 @@ async def create_org(db: AsyncSession, creator: User, name: str, slug: str) -> O
     await db.refresh(org)
     logger.info("org created: %s by %s", org.id, creator.id)
     return org
+
+
+async def get_organization(db: AsyncSession, org_id: uuid.UUID) -> Organization:
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise NotFoundError("organization not found")
+    return org
+
+
+async def get_org_settings(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any]:
+    """Public read of `organizations.settings` for other modules (e.g. `ai`
+    resolving per-org model config) — CLAUDE.md §3: cross-module access goes
+    through a service function, never a direct query against another
+    module's table."""
+    org = await get_organization(db, org_id)
+    return org.settings
+
+
+async def update_org_settings(
+    db: AsyncSession, org_id: uuid.UUID, patch: dict[str, Any]
+) -> dict[str, Any]:
+    """Shallow-merges `patch` into `organizations.settings` and persists it.
+    Callers (e.g. `ai.service.update_org_ai_config`) own validating which
+    keys/values are meaningful — this just owns the JSONB column."""
+    org = await get_organization(db, org_id)
+    org.settings = {**org.settings, **patch}
+    await db.commit()
+    return org.settings
 
 
 async def list_user_orgs(db: AsyncSession, user_id: uuid.UUID) -> list[Organization]:

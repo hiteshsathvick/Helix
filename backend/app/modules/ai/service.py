@@ -1,70 +1,91 @@
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from functools import lru_cache
 
-from anthropic import AsyncAnthropic
-from anthropic.types import MessageParam
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
+from app.modules.ai.providers import Message, TextDelta, UsageInfo, compute_cost, get_provider
+from app.modules.ai.schemas import OrgAIConfigUpdate
+from app.modules.orgs import service as orgs_service
 
 logger = logging.getLogger("helix.ai")
 
-
-@dataclass
-class TextDelta:
-    text: str
-
-
-@dataclass
-class UsageInfo:
-    input_tokens: int
-    output_tokens: int
-
-
-# $ per million tokens (input, output). Verified against
-# https://platform.claude.com/docs/en/about-claude/pricing on 2026-08-26.
-# Phase 11's real provider abstraction replaces this with something that
-# doesn't need updating by hand.
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-sonnet-5": (2.0, 10.0),
-}
+__all__ = [
+    "TextDelta",
+    "UsageInfo",
+    "compute_cost",
+    "resolve_org_ai_config",
+    "update_org_ai_config",
+    "stream_completion",
+    "OrgAIConfig",
+]
 
 
-def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    input_price, output_price = MODEL_PRICING.get(model, (0.0, 0.0))
-    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+@dataclass(frozen=True)
+class OrgAIConfig:
+    provider: str
+    model: str
+    monthly_cost_cap_usd: float | None
 
 
-@lru_cache
-def _get_client() -> AsyncAnthropic:
+def _default_model_for(provider: str, settings: Settings) -> str:
+    return {
+        "anthropic": settings.llm_model,
+        "openai": settings.openai_model,
+        "ollama": settings.ollama_model,
+    }[provider]
+
+
+async def resolve_org_ai_config(db: AsyncSession, org_id: uuid.UUID) -> OrgAIConfig:
     settings = get_settings()
-    return AsyncAnthropic(api_key=settings.anthropic_api_key)
+    org_settings = await orgs_service.get_org_settings(db, org_id)
+    provider = org_settings.get("ai_provider") or settings.ai_default_provider
+    model = org_settings.get("ai_model") or _default_model_for(provider, settings)
+    # A key present with value None (an org that explicitly cleared its
+    # override — OrgAIConfigUpdate's docstring) falls through to the global
+    # default exactly like a missing key, via `or` rather than `.get(key,
+    # default)` which would only catch the missing-key case.
+    org_cap = org_settings.get("ai_monthly_cost_cap_usd")
+    cap = org_cap if org_cap is not None else settings.ai_default_monthly_cost_cap_usd
+    return OrgAIConfig(
+        provider=provider, model=model, monthly_cost_cap_usd=cap if cap is None else float(cap)
+    )
+
+
+async def update_org_ai_config(
+    db: AsyncSession, org_id: uuid.UUID, update: OrgAIConfigUpdate
+) -> OrgAIConfig:
+    patch: dict[str, str | float | None] = {}
+    if update.provider is not None:
+        patch["ai_provider"] = update.provider
+    if update.model is not None:
+        patch["ai_model"] = update.model
+    if "monthly_cost_cap_usd" in update.model_fields_set:
+        patch["ai_monthly_cost_cap_usd"] = update.monthly_cost_cap_usd
+    await orgs_service.update_org_settings(db, org_id, patch)
+    return await resolve_org_ai_config(db, org_id)
 
 
 async def stream_completion(
-    system: str, messages: list[MessageParam], max_tokens: int
+    system: str,
+    messages: list[Message],
+    max_tokens: int,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> AsyncIterator[TextDelta | UsageInfo]:
-    """Streams a single completion. Yields `TextDelta`s as they arrive,
-    then exactly one final `UsageInfo` once the model is done — callers
+    """Streams a single completion via the resolved provider. Yields
+    `TextDelta`s as they arrive, then exactly one final `UsageInfo` — callers
     that only care about the text can ignore anything that isn't a
     `TextDelta`; callers that need cost/token accounting (assistant.service,
-    for persisting `messages.tokens`/`messages.cost`) get it without a
-    second round trip.
+    for persisting `messages.tokens`/`messages.cost`) get it without a second
+    round trip.
     """
     settings = get_settings()
-    client = _get_client()
-
-    async with client.messages.stream(
-        model=settings.llm_model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=messages,
-    ) as stream:
-        async for text in stream.text_stream:
-            yield TextDelta(text)
-        final_message = await stream.get_final_message()
-        yield UsageInfo(
-            input_tokens=final_message.usage.input_tokens,
-            output_tokens=final_message.usage.output_tokens,
-        )
+    provider_name = provider or settings.ai_default_provider
+    model_name = model or _default_model_for(provider_name, settings)
+    llm = get_provider(provider_name)
+    async for event in llm.stream(system, messages, model_name, max_tokens):
+        yield event
