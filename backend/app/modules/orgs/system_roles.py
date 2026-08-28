@@ -19,12 +19,16 @@ PERMISSION_AGENTS_RUN = "agents:run"
 PERMISSION_WORKFLOWS_MANAGE = "workflows:manage"
 PERMISSION_WORKFLOWS_RUN = "workflows:run"
 PERMISSION_CONNECTORS_MANAGE = "connectors:manage"
+# Billing (Phase 16) is the first permission reserved to Owner alone --
+# subscription/payment changes are a materially different trust level than
+# any org-configuration permission an Admin already holds, and Stripe
+# itself treats "who can change the plan" as an owner-level decision.
+PERMISSION_BILLING_MANAGE = "billing:manage"
 
-# Owner and Admin are identical today — SPEC.md §14 requires each
-# permission to be listed explicitly rather than an implicit bypass, and
-# nothing yet needs a permission reserved to Owner alone (that appears once
-# billing exists in a later phase).
-_FULL_PERMISSIONS = [
+# Owner and Admin were identical before billing existed (SPEC.md §14
+# requires each permission to be listed explicitly rather than an implicit
+# bypass) -- they now diverge by exactly PERMISSION_BILLING_MANAGE.
+_SHARED_ADMIN_PERMISSIONS = [
     PERMISSION_MEMBERS_READ,
     PERMISSION_MEMBERS_INVITE,
     PERMISSION_MEMBERS_MANAGE,
@@ -43,6 +47,7 @@ _FULL_PERMISSIONS = [
     # configure" persona -- Owner/Admin only, not Member.
     PERMISSION_CONNECTORS_MANAGE,
 ]
+_FULL_PERMISSIONS = [*_SHARED_ADMIN_PERMISSIONS, PERMISSION_BILLING_MANAGE]
 _MEMBER_PERMISSIONS = [
     PERMISSION_MEMBERS_READ,
     PERMISSION_DOCUMENTS_READ,
@@ -56,7 +61,7 @@ _VIEWER_PERMISSIONS = [PERMISSION_MEMBERS_READ, PERMISSION_DOCUMENTS_READ]
 
 SYSTEM_ROLES: dict[uuid.UUID, tuple[str, list[str]]] = {
     OWNER_ROLE_ID: ("Owner", _FULL_PERMISSIONS),
-    ADMIN_ROLE_ID: ("Admin", _FULL_PERMISSIONS),
+    ADMIN_ROLE_ID: ("Admin", _SHARED_ADMIN_PERMISSIONS),
     MEMBER_ROLE_ID: ("Member", _MEMBER_PERMISSIONS),
     VIEWER_ROLE_ID: ("Viewer", _VIEWER_PERMISSIONS),
 }

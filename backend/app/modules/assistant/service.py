@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import tiktoken
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -16,6 +16,7 @@ from app.modules.ai import service as ai_service
 from app.modules.ai.prompts import ASSISTANT_SYSTEM_PROMPT_CURRENT, NO_CONTEXT_PLACEHOLDER
 from app.modules.assistant.models import Conversation, Message
 from app.modules.assistant.schemas import Citation
+from app.modules.billing import service as billing_service
 from app.modules.ingestion import service as ingestion_service
 from app.modules.search import service as search_service
 from app.modules.search.schemas import SearchResult
@@ -114,25 +115,21 @@ async def _get_history(
     return list(reversed(result.scalars().all()))
 
 
-async def _get_monthly_spend(db: AsyncSession, org_id: uuid.UUID) -> float:
-    month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    result = await db.execute(
-        select(func.coalesce(func.sum(Message.cost), 0.0)).where(
-            Message.org_id == org_id, Message.created_at >= month_start
-        )
-    )
-    return float(result.scalar_one())
-
-
 async def assert_within_cost_cap(db: AsyncSession, org_id: uuid.UUID) -> None:
     """Called by the router *before* opening the SSE stream — same reasoning
     as `resolve_conversation` above: a `QuotaExceededError` raised from
     inside the streaming generator would land after the 200 status and
     headers are already committed, and couldn't become a clean 402 at all.
+
+    Spend comes from billing's org-wide `usage_events` total (Phase 16),
+    not a sum of this module's own `messages.cost` -- before billing
+    existed, each of assistant/agents/workflows only ever saw its own
+    spend, so an org's cap was really three independent, three-times-larger
+    budgets rather than one.
     """
     await set_tenant_context(db, org_id)
     ai_config = await ai_service.resolve_org_ai_config(db, org_id)
-    spent = await _get_monthly_spend(db, org_id)
+    spent = await billing_service.get_monthly_usage_usd(db, org_id)
     cost_guard.enforce_cost_cap(spent, ai_config.monthly_cost_cap_usd)
 
 
@@ -220,6 +217,9 @@ async def query(
         cost=cost,
     )
     db.add(assistant_message)
+    await billing_service.record_usage(
+        db, org_id, "assistant_query", input_tokens + output_tokens, cost
+    )
     await db.commit()
 
     # assistant_message.id is already known (UUIDPKMixin sets it client-side

@@ -5,6 +5,8 @@ from app.modules.ai.router import router as ai_router
 from app.modules.assistant.router import conversations_router
 from app.modules.assistant.router import router as assistant_router
 from app.modules.auth.router import router as auth_router
+from app.modules.billing.router import router as billing_router
+from app.modules.billing.router import webhooks_router as billing_webhooks_router
 from app.modules.connectors.router import oauth_router as connectors_oauth_router
 from app.modules.connectors.router import router as connectors_router
 from app.modules.documents.router import router as documents_router
@@ -32,3 +34,5 @@ router.include_router(connectors_router)
 router.include_router(connectors_oauth_router)
 router.include_router(notifications_router)
 router.include_router(notification_prefs_router)
+router.include_router(billing_router)
+router.include_router(billing_webhooks_router)

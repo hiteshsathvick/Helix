@@ -129,6 +129,24 @@ class Settings(BaseSettings):
     # UTC hour the daily digest sweep runs at.
     notification_digest_hour: int = 9
 
+    # Billing (SPEC.md §16, Phase 16). Test-mode Stripe keys are free --
+    # create a Stripe account, stay in test mode, and use its sk_test_...
+    # secret key. The webhook secret comes from `stripe listen` for local
+    # dev, or the dashboard's webhook config for a deployed environment.
+    # Price IDs are only needed to actually create a Checkout Session for
+    # that plan; the free plan needs neither Stripe object.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id_pro: str = ""
+    stripe_price_id_enterprise: str = ""
+    # Where Stripe Checkout redirects the browser back to on success/cancel.
+    stripe_checkout_success_url: str = (
+        "http://localhost:3000/orgs/{org_id}/billing?checkout=success"
+    )
+    stripe_checkout_cancel_url: str = (
+        "http://localhost:3000/orgs/{org_id}/billing?checkout=cancelled"
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

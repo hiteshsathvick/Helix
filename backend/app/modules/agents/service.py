@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -15,6 +15,7 @@ from app.modules.agents.models import Agent, AgentRun, AgentStep
 from app.modules.agents.tools import TOOLS, ToolContext
 from app.modules.ai import cost_guard
 from app.modules.ai import service as ai_service
+from app.modules.billing import service as billing_service
 
 logger = logging.getLogger("helix.agents")
 
@@ -68,16 +69,6 @@ async def get_agent(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) ->
     return agent
 
 
-async def _get_monthly_spend(db: AsyncSession, org_id: uuid.UUID) -> float:
-    month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    result = await db.execute(
-        select(func.coalesce(func.sum(AgentRun.cost), 0.0)).where(
-            AgentRun.org_id == org_id, AgentRun.created_at >= month_start
-        )
-    )
-    return float(result.scalar_one())
-
-
 async def create_run(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, agent_id: uuid.UUID, input_text: str
 ) -> AgentRun:
@@ -89,13 +80,13 @@ async def create_run(
     await set_tenant_context(db, org_id)
     await get_agent(db, org_id, agent_id)  # 404s if missing/not this org
 
-    # Checked here, before a job is even enqueued — not the org's whole ai
-    # budget (that also covers assistant queries), just this module's own
-    # spend against the same shared cap value. See ai/cost_guard.py's
-    # module docstring: this is a lightweight guard, not a unified ledger
-    # across every AI-spending surface.
+    # Checked here, before a job is even enqueued. Spend comes from
+    # billing's org-wide usage_events total (Phase 16) -- the org's whole
+    # AI budget across assistant/agents/workflows together, not just this
+    # module's own runs (see billing/service.py::get_monthly_usage_usd's
+    # docstring for what this replaced).
     ai_config = await ai_service.resolve_org_ai_config(db, org_id)
-    spent = await _get_monthly_spend(db, org_id)
+    spent = await billing_service.get_monthly_usage_usd(db, org_id)
     cost_guard.enforce_cost_cap(spent, ai_config.monthly_cost_cap_usd)
 
     run = AgentRun(
@@ -270,5 +261,6 @@ async def execute_run(db: AsyncSession, org_id: uuid.UUID, run_id: uuid.UUID) ->
     run.tokens = total_input_tokens + total_output_tokens
     run.cost = ai_service.compute_cost(ai_config.model, total_input_tokens, total_output_tokens)
     run.finished_at = datetime.now(UTC)
+    await billing_service.record_usage(db, org_id, "agent_run", run.tokens, run.cost)
     await db.commit()
     logger.info("agent run %s finished: status=%s", run.id, run.status)

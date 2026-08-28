@@ -3,13 +3,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, ForbiddenError, NotFoundError
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, QuotaExceededError
 from app.core.security import generate_opaque_token, hash_opaque_token
 from app.modules.auth import service as auth_service
 from app.modules.auth.models import User
+from app.modules.billing.plans import get_plan
 from app.modules.orgs.models import Invitation, Membership, Organization, Role
 from app.modules.orgs.schemas import MemberRead
 from app.modules.orgs.system_roles import MEMBER_ROLE_ID, OWNER_ROLE_ID
@@ -44,6 +45,17 @@ async def get_organization(db: AsyncSession, org_id: uuid.UUID) -> Organization:
     if org is None:
         raise NotFoundError("organization not found")
     return org
+
+
+async def update_org_plan(db: AsyncSession, org_id: uuid.UUID, plan: str) -> None:
+    """Called by billing/service.py's webhook handler once a Stripe
+    subscription is confirmed -- orgs owns the `Organization` table, so
+    billing goes through this rather than importing the model directly
+    (CLAUDE.md §3). `Organization.plan` (Phase 6, unused until billing
+    existed) is the fast-path field every quota/cap check reads.
+    """
+    await db.execute(update(Organization).where(Organization.id == org_id).values(plan=plan))
+    await db.commit()
 
 
 async def list_all_org_ids(db: AsyncSession) -> list[uuid.UUID]:
@@ -115,6 +127,31 @@ async def list_org_members(db: AsyncSession, org_id: uuid.UUID) -> list[MemberRe
 async def create_invitation(
     db: AsyncSession, org_id: uuid.UUID, invited_by: User, email: str
 ) -> tuple[Invitation, str]:
+    # Seat quota (SPEC.md §16). Counts pending invitations too, not just
+    # active members -- otherwise a 3-seat plan could issue an unbounded
+    # number of outstanding invites, all racing to accept past the limit.
+    # `billing.plans` is pure config (no models) -- importing it here isn't
+    # the cross-module table access CLAUDE.md §3 forbids.
+    org = await get_organization(db, org_id)
+    seats_limit = get_plan(org.plan).seats_limit
+    if seats_limit is not None:
+        member_count = len(await list_org_members(db, org_id))
+        pending_result = await db.execute(
+            select(func.count())
+            .select_from(Invitation)
+            .where(
+                Invitation.org_id == org_id,
+                Invitation.status == "pending",
+                Invitation.expires_at >= datetime.now(UTC),
+            )
+        )
+        seats_used = member_count + pending_result.scalar_one()
+        if seats_used >= seats_limit:
+            raise QuotaExceededError(
+                "organization has reached its plan's seat limit",
+                details={"plan": org.plan, "seats_limit": seats_limit, "seats_used": seats_used},
+            )
+
     raw_token = generate_opaque_token()
     invitation = Invitation(
         org_id=org_id,

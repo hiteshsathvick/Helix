@@ -1,10 +1,9 @@
 import logging
 import secrets
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnauthorizedError
@@ -12,6 +11,7 @@ from app.core.queue import enqueue_workflow_run
 from app.core.tenancy import set_tenant_context
 from app.modules.ai import cost_guard
 from app.modules.ai import service as ai_service
+from app.modules.billing import service as billing_service
 from app.modules.workflows.models import StepRun, Workflow, WorkflowRun, WorkflowVersion
 from app.modules.workflows.schemas import WorkflowGraph
 
@@ -156,16 +156,6 @@ async def list_versions(
     return list(result.scalars().all())
 
 
-async def _get_monthly_spend(db: AsyncSession, org_id: uuid.UUID) -> float:
-    month_start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    result = await db.execute(
-        select(func.coalesce(func.sum(WorkflowRun.cost), 0.0)).where(
-            WorkflowRun.org_id == org_id, WorkflowRun.created_at >= month_start
-        )
-    )
-    return float(result.scalar_one())
-
-
 async def create_run(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -186,14 +176,12 @@ async def create_run(
 
     version = await get_current_version(db, org_id, workflow_id)
 
-    # Same per-module cost-cap pattern agents/assistant already use: each
-    # AI-spending surface checks its own spend against the org's shared cap
-    # value (ai/cost_guard's own docstring already frames this as "a
-    # lightweight guard, not a unified ledger across every surface" -- a
-    # true cross-surface ledger is a known, pre-existing gap, not something
-    # this phase should fix as a side effect).
+    # Spend now comes from billing's org-wide usage_events total (Phase
+    # 16) -- the true cross-surface ledger the pre-Phase-16 comment here
+    # called "a known, pre-existing gap, not something this phase should
+    # fix as a side effect" (Phase 13). It exists now.
     ai_config = await ai_service.resolve_org_ai_config(db, org_id)
-    spent = await _get_monthly_spend(db, org_id)
+    spent = await billing_service.get_monthly_usage_usd(db, org_id)
     cost_guard.enforce_cost_cap(spent, ai_config.monthly_cost_cap_usd)
 
     run = WorkflowRun(

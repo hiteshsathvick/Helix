@@ -32,6 +32,10 @@ dependencies = [
     # at rest (SPEC.md §26) — core/security.py only has one-way hashing,
     # and a token must be decrypted to make API calls with it.
     "cryptography>=43,<44",
+    # Checkout Sessions, Subscriptions, and webhook signature verification
+    # (SPEC.md §16) -- the official SDK is the boring, correct choice over
+    # hand-rolling Stripe's HMAC-timestamp webhook scheme.
+    "stripe>=10,<11",
 ]
 
 [project.optional-dependencies]

@@ -22,6 +22,7 @@ from app.core.queue import enqueue_workflow_run_deferred
 from app.core.tenancy import set_tenant_context
 from app.modules.agents.tools import TOOLS, ToolContext
 from app.modules.ai import service as ai_service
+from app.modules.billing import service as billing_service
 from app.modules.workflows.conditions import evaluate_condition, resolve_refs
 from app.modules.workflows.models import StepRun, Workflow, WorkflowRun, WorkflowVersion
 from app.modules.workflows.schemas import WorkflowEdge, WorkflowGraph, WorkflowNode
@@ -238,8 +239,11 @@ async def _execute_node(
             if "error" in output:
                 raise RuntimeError(str(output["error"]))
         elif node.type == "ai":
-            output, cost = await _execute_ai_node(db, org_id, run, node, acting_user_id, settings)
+            output, cost, tokens = await _execute_ai_node(
+                db, org_id, run, node, acting_user_id, settings
+            )
             run.cost += cost
+            await billing_service.record_usage(db, org_id, "workflow_ai_node", tokens, cost)
         else:
             output = {}
     except Exception as exc:  # noqa: BLE001 -- one bad node must not crash the run
@@ -276,7 +280,7 @@ async def _execute_ai_node(
     node: WorkflowNode,
     acting_user_id: uuid.UUID,
     settings: Any,
-) -> tuple[dict[str, Any], float]:
+) -> tuple[dict[str, Any], float, int]:
     ai_config = await ai_service.resolve_org_ai_config(db, org_id)
     allowed_tools: list[str] = node.config.get("allowed_tools", [])
     tool_specs = [TOOLS[name].spec for name in allowed_tools if name in TOOLS]
@@ -322,7 +326,7 @@ async def _execute_ai_node(
         raise RuntimeError("ai node exceeded its maximum tool-call rounds without a final answer")
 
     cost = ai_service.compute_cost(ai_config.model, total_input_tokens, total_output_tokens)
-    return {"text": final_text}, cost
+    return {"text": final_text}, cost, total_input_tokens + total_output_tokens
 
 
 def _record_step_output(run: WorkflowRun, step: StepRun) -> None:
