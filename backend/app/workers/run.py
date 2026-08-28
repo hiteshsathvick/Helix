@@ -23,6 +23,8 @@ from app.core.logging import configure_logging
 # transitively) until a real worker actually runs one.
 from app.modules.agents import models as agents_models  # noqa: F401
 from app.modules.agents.tasks import run_agent_task
+from app.modules.api import models as api_models  # noqa: F401
+from app.modules.api.tasks import deliver_webhook_task, dispatch_webhooks_for_event_task
 from app.modules.assistant import models as assistant_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.connectors.tasks import sweep_connector_syncs_task, sync_connector_task
@@ -49,6 +51,8 @@ class WorkerSettings:
         arq_func(dispatch_domain_event_task, max_tries=3),
         arq_func(sync_connector_task, max_tries=_settings.connector_sync_max_job_attempts),
         arq_func(send_notification_task, max_tries=_settings.notification_max_job_attempts),
+        arq_func(dispatch_webhooks_for_event_task, max_tries=3),
+        arq_func(deliver_webhook_task, max_tries=_settings.webhook_delivery_max_job_attempts),
     ]
     # Fixed, platform-wide periodic sweeps (SPEC.md §26 connector syncs,
     # §23 notification digests) -- not per-item dynamic schedules, which

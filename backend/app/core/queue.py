@@ -89,6 +89,31 @@ async def enqueue_agent_run(run_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid
         await pool.aclose()
 
 
+async def enqueue_webhook_dispatch(event_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """Fires alongside enqueue_event_dispatch (not instead of it) from
+    core/events.py::publish_event -- webhooks (api module) and workflow
+    triggers (workflows module) are two independent consumers of the same
+    domain-event bus, each with its own job."""
+    settings = get_settings()
+    pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        await pool.enqueue_job("dispatch_webhooks_for_event_task", str(event_id), str(org_id))
+    finally:
+        await pool.aclose()
+
+
+async def enqueue_webhook_delivery(delivery_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """One per WebhookDelivery row (api/service.py::dispatch_webhooks_for_event),
+    so each subscriber's delivery retries independently of every other
+    subscriber's."""
+    settings = get_settings()
+    pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        await pool.enqueue_job("deliver_webhook_task", str(delivery_id), str(org_id))
+    finally:
+        await pool.aclose()
+
+
 async def enqueue_notification_send(notification_id: uuid.UUID, org_id: uuid.UUID) -> None:
     """An immediate-frequency email notification (notifications/service.py
     ::notify) enqueues here right after being created — never sent inline

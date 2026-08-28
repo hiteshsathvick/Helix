@@ -60,6 +60,7 @@ extend-immutable-calls = [
     "fastapi.Query",
     "fastapi.File",
     "app.modules.orgs.dependencies.require_permission",
+    "app.modules.api.dependencies.require_api_key",
 ]
 
 [tool.mypy]

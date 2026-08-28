@@ -3,6 +3,9 @@ from fastapi import APIRouter
 from app.modules.agents.router import router as agents_router
 from app.modules.ai.router import router as ai_router
 from app.modules.analytics.router import router as analytics_router
+from app.modules.api.router import public_router as public_api_router
+from app.modules.api.router import router as api_keys_router
+from app.modules.api.router import webhooks_router as api_webhooks_router
 from app.modules.assistant.router import conversations_router
 from app.modules.assistant.router import router as assistant_router
 from app.modules.audit.router import router as audit_router
@@ -40,3 +43,6 @@ router.include_router(billing_router)
 router.include_router(billing_webhooks_router)
 router.include_router(audit_router)
 router.include_router(analytics_router)
+router.include_router(api_keys_router)
+router.include_router(api_webhooks_router)
+router.include_router(public_api_router)

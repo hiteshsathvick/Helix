@@ -147,6 +147,13 @@ class Settings(BaseSettings):
         "http://localhost:3000/orgs/{org_id}/billing?checkout=cancelled"
     )
 
+    # Public API & webhooks (SPEC.md §18, Phase 18). No paid service --
+    # outbound webhook delivery is a plain httpx POST (already a dependency).
+    public_api_rate_limit_max_requests: int = 60
+    public_api_rate_limit_window_seconds: int = 60
+    webhook_delivery_max_job_attempts: int = 5
+    webhook_delivery_timeout_seconds: float = 10.0
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -58,6 +58,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link href={`/orgs/${activeOrgId}/analytics`} className="underline">
                 Analytics
               </Link>
+              <Link href={`/orgs/${activeOrgId}/api-keys`} className="underline">
+                API Keys
+              </Link>
+              <Link href={`/orgs/${activeOrgId}/webhooks`} className="underline">
+                Webhooks
+              </Link>
             </>
           )}
         </nav>

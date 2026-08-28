@@ -33,6 +33,13 @@ PERMISSION_BILLING_MANAGE = "billing:manage"
 # same pattern -- same practical audience, still separate strings).
 PERMISSION_AUDIT_READ = "audit:read"
 PERMISSION_ANALYTICS_READ = "analytics:read"
+# API keys and webhooks (Phase 18) are external-credential/integration
+# surfaces -- same Owner/Admin (not Member) tier as connectors:manage, for
+# the same reason: a leaked key or a maliciously-pointed webhook is a
+# materially different risk than the day-to-day agents:run/workflows:run
+# Member tier carries.
+PERMISSION_API_KEYS_MANAGE = "api_keys:manage"
+PERMISSION_WEBHOOKS_MANAGE = "webhooks:manage"
 
 # Owner and Admin were identical before billing existed (SPEC.md §14
 # requires each permission to be listed explicitly rather than an implicit
@@ -57,6 +64,8 @@ _SHARED_ADMIN_PERMISSIONS = [
     PERMISSION_CONNECTORS_MANAGE,
     PERMISSION_AUDIT_READ,
     PERMISSION_ANALYTICS_READ,
+    PERMISSION_API_KEYS_MANAGE,
+    PERMISSION_WEBHOOKS_MANAGE,
 ]
 _FULL_PERMISSIONS = [*_SHARED_ADMIN_PERMISSIONS, PERMISSION_BILLING_MANAGE]
 _MEMBER_PERMISSIONS = [

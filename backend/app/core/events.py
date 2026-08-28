@@ -3,7 +3,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.queue import enqueue_event_dispatch
+from app.core.queue import enqueue_event_dispatch, enqueue_webhook_dispatch
 from app.core.tenancy import set_tenant_context
 from app.modules.events.models import DomainEvent
 
@@ -44,4 +44,7 @@ async def publish_event(
     await db.refresh(event)
 
     await enqueue_event_dispatch(event.id, org_id)
+    # Independent of the workflow-trigger dispatch above -- see
+    # enqueue_webhook_dispatch's own docstring.
+    await enqueue_webhook_dispatch(event.id, org_id)
     return event
