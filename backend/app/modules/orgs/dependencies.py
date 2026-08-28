@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.tenancy import set_tenant_context
+from app.modules.audit import service as audit_service
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.orgs.models import Membership, Role
@@ -47,8 +48,10 @@ def require_permission(
     Composes with require_org_member (membership + RLS context already
     verified), then resolves the caller's role for that org and checks the
     permission is in its list — SPEC.md §14: checked after authentication
-    and tenant resolution, before business logic. Denials are logged
-    (SPEC.md §14 "denials are audited"); persisted audit_logs is Phase 17.
+    and tenant resolution, before business logic. Denials are logged and
+    (Phase 17) persisted to audit_logs — this dependency itself commits
+    that one row, since the request aborts with a 403 immediately after
+    and nothing downstream would otherwise persist it.
     """
 
     async def _check(
@@ -69,6 +72,14 @@ def require_permission(
                 org_id,
                 permission,
             )
+            await audit_service.record(
+                db,
+                org_id,
+                current_user.id,
+                "permission.denied",
+                metadata={"permission": permission},
+            )
+            await db.commit()
             raise ForbiddenError(f"missing required permission: {permission}")
         return org_id
 

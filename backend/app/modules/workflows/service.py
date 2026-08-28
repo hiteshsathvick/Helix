@@ -1,9 +1,10 @@
 import logging
 import secrets
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnauthorizedError
@@ -11,6 +12,7 @@ from app.core.queue import enqueue_workflow_run
 from app.core.tenancy import set_tenant_context
 from app.modules.ai import cost_guard
 from app.modules.ai import service as ai_service
+from app.modules.audit import service as audit_service
 from app.modules.billing import service as billing_service
 from app.modules.workflows.models import StepRun, Workflow, WorkflowRun, WorkflowVersion
 from app.modules.workflows.schemas import WorkflowGraph
@@ -194,6 +196,17 @@ async def create_run(
         triggered_by_user_id=triggered_by_user_id,
     )
     db.add(run)
+    # triggered_by_user_id is None for webhook/event-triggered runs -- audit
+    # actor_id is nullable for exactly this case (a system-triggered run
+    # still gets logged, just without a human actor).
+    await audit_service.record(
+        db,
+        org_id,
+        triggered_by_user_id,
+        "workflow.run_created",
+        resource_type="workflow_run",
+        resource_id=run.id,
+    )
     await db.commit()
     await set_tenant_context(db, org_id)
     await db.refresh(run)
@@ -201,6 +214,19 @@ async def create_run(
     await enqueue_workflow_run(run.id, org_id)
     logger.info("workflow run enqueued: %s for workflow %s", run.id, workflow_id)
     return run
+
+
+async def get_run_status_counts(
+    db: AsyncSession, org_id: uuid.UUID, since: datetime
+) -> dict[str, int]:
+    """Workflow success-rate figure for analytics/service.py."""
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(WorkflowRun.status, func.count())
+        .where(WorkflowRun.org_id == org_id, WorkflowRun.created_at >= since)
+        .group_by(WorkflowRun.status)
+    )
+    return {status: count for status, count in result.all()}
 
 
 async def list_runs(

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import ConflictError
 from app.core.tenancy import set_tenant_context
+from app.modules.audit import service as audit_service
 from app.modules.billing import stripe_client
 from app.modules.billing.models import Subscription, UsageEvent
 from app.modules.billing.plans import get_plan
@@ -54,7 +55,9 @@ async def get_billing_summary(db: AsyncSession, org_id: uuid.UUID) -> BillingSum
     )
 
 
-async def start_checkout(db: AsyncSession, org_id: uuid.UUID, plan: str) -> str:
+async def start_checkout(
+    db: AsyncSession, org_id: uuid.UUID, plan: str, actor_id: uuid.UUID
+) -> str:
     org = await orgs_service.get_organization(db, org_id)
     plan_config = get_plan(plan)
     if plan_config.stripe_price_id is None:
@@ -77,14 +80,29 @@ async def start_checkout(db: AsyncSession, org_id: uuid.UUID, plan: str) -> str:
         success_url=settings.stripe_checkout_success_url.format(org_id=org_id),
         cancel_url=settings.stripe_checkout_cancel_url.format(org_id=org_id),
     )
+    await set_tenant_context(db, org_id)
+    await audit_service.record(
+        db,
+        org_id,
+        actor_id,
+        "billing.checkout_started",
+        resource_type="org",
+        metadata={"plan": plan},
+    )
+    await db.commit()
     return checkout_url
 
 
-async def cancel_subscription(db: AsyncSession, org_id: uuid.UUID) -> None:
+async def cancel_subscription(db: AsyncSession, org_id: uuid.UUID, actor_id: uuid.UUID) -> None:
     subscription = await _get_or_create_subscription(db, org_id)
     if subscription.stripe_subscription_id is None:
         raise ConflictError("organization has no active Stripe subscription to cancel")
     stripe_client.cancel_subscription_at_period_end(subscription.stripe_subscription_id)
+    await set_tenant_context(db, org_id)
+    await audit_service.record(
+        db, org_id, actor_id, "billing.subscription_cancelled", resource_type="org"
+    )
+    await db.commit()
     logger.info("subscription cancellation scheduled: org=%s", org_id)
 
 
@@ -119,6 +137,16 @@ async def _apply_plan(
         subscription.stripe_customer_id = stripe_customer_id
     if stripe_subscription_id is not None:
         subscription.stripe_subscription_id = stripe_subscription_id
+    # actor_id=None -- this is a Stripe webhook, not a human action; SPEC.md
+    # §10's actor_id is nullable for exactly this case.
+    await audit_service.record(
+        db,
+        org_id,
+        None,
+        "billing.plan_changed",
+        resource_type="org",
+        metadata={"plan": plan, "status": status},
+    )
     await db.commit()
 
     await orgs_service.update_org_plan(db, org_id, plan)

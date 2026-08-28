@@ -2,8 +2,10 @@ from fastapi import APIRouter
 
 from app.modules.agents.router import router as agents_router
 from app.modules.ai.router import router as ai_router
+from app.modules.analytics.router import router as analytics_router
 from app.modules.assistant.router import conversations_router
 from app.modules.assistant.router import router as assistant_router
+from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.router import webhooks_router as billing_webhooks_router
@@ -36,3 +38,5 @@ router.include_router(notifications_router)
 router.include_router(notification_prefs_router)
 router.include_router(billing_router)
 router.include_router(billing_webhooks_router)
+router.include_router(audit_router)
+router.include_router(analytics_router)

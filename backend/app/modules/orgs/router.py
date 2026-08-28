@@ -126,9 +126,12 @@ async def update_membership_role(
     membership_id: uuid.UUID,
     body: MembershipRoleUpdate,
     org_id: uuid.UUID = Depends(require_permission(PERMISSION_MEMBERS_MANAGE)),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MemberRead:
-    return await service.update_membership_role(db, org_id, membership_id, body.role_id)
+    return await service.update_membership_role(
+        db, org_id, membership_id, body.role_id, current_user.id
+    )
 
 
 @invitations_router.post("/{token}/accept", response_model=AccessTokenResponse)

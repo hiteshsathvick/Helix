@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
@@ -245,6 +245,20 @@ async def update_document_content(
 
     await ingestion_service.trigger_ingestion(db, org_id, document.id)
     return document
+
+
+async def get_status_counts(db: AsyncSession, org_id: uuid.UUID) -> dict[str, int]:
+    """Ingestion health (SPEC.md §27) -- current state, not a monthly
+    window: a stuck "error" document from three months ago is still
+    unhealthy today. analytics/service.py calls this rather than querying
+    `documents` directly (CLAUDE.md §3)."""
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(Document.status, func.count())
+        .where(Document.org_id == org_id, Document.deleted_at.is_(None))
+        .group_by(Document.status)
+    )
+    return {status: count for status, count in result.all()}
 
 
 async def list_documents(db: AsyncSession, org_id: uuid.UUID) -> list[Document]:

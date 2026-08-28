@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.db import Base
 from app.modules.agents import models as agents_models  # noqa: F401
 from app.modules.assistant import models as assistant_models  # noqa: F401
+from app.modules.audit import models as audit_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.billing import models as billing_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401

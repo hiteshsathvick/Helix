@@ -111,12 +111,18 @@ async def rotate_refresh_token(db: AsyncSession, raw_token: str) -> tuple[User, 
     return user, new_raw_token
 
 
-async def revoke_refresh_token(db: AsyncSession, raw_token: str) -> None:
+async def revoke_refresh_token(db: AsyncSession, raw_token: str) -> User | None:
+    """Returns the affected user (for the router to audit the logout
+    against their active org), or None if the token was already
+    revoked/unknown -- a logout with no session to revoke isn't audited."""
     result = await db.execute(
         select(RefreshToken).where(RefreshToken.token_hash == hash_opaque_token(raw_token))
     )
     record = result.scalar_one_or_none()
-    if record is not None and record.revoked_at is None:
-        record.revoked_at = datetime.now(UTC)
-        await db.commit()
-        logger.info("refresh token revoked: %s", record.user_id)
+    if record is None or record.revoked_at is not None:
+        return None
+
+    record.revoked_at = datetime.now(UTC)
+    await db.commit()
+    logger.info("refresh token revoked: %s", record.user_id)
+    return await db.get(User, record.user_id)

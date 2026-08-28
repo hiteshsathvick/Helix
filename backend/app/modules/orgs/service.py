@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, QuotaExceededError
 from app.core.security import generate_opaque_token, hash_opaque_token
+from app.core.tenancy import set_tenant_context
+from app.modules.audit import service as audit_service
 from app.modules.auth import service as auth_service
 from app.modules.auth.models import User
 from app.modules.billing.plans import get_plan
@@ -161,6 +163,15 @@ async def create_invitation(
         expires_at=datetime.now(UTC) + timedelta(days=_INVITATION_TTL_DAYS),
     )
     db.add(invitation)
+    await audit_service.record(
+        db,
+        org_id,
+        invited_by.id,
+        "invitation.created",
+        resource_type="invitation",
+        resource_id=invitation.id,
+        metadata={"email": email},
+    )
     await db.commit()
     await db.refresh(invitation)
     logger.info("invitation created for org %s: %s", org_id, invitation.id)
@@ -184,6 +195,15 @@ async def accept_invitation(db: AsyncSession, raw_token: str, accepting_user: Us
     if org is None:
         raise NotFoundError("invitation not found or no longer valid")
 
+    # The accepting user has no membership in this org yet, so no tenant
+    # context was ever established for it in this session -- set it now
+    # (matches the org they're about to join) so the audit insert below
+    # satisfies audit_logs' plain "org_id = current_org" RLS check. The
+    # membership insert just below already worked without this (its own
+    # policy has a separate user_id branch, per the comment there), but
+    # setting it explicitly is correct regardless and costs nothing.
+    await set_tenant_context(db, invitation.org_id)
+
     existing_membership = await db.execute(
         select(Membership.id).where(
             Membership.org_id == invitation.org_id, Membership.user_id == accepting_user.id
@@ -203,6 +223,14 @@ async def accept_invitation(db: AsyncSession, raw_token: str, accepting_user: Us
     if accepting_user.active_org_id is None:
         accepting_user.active_org_id = invitation.org_id
 
+    await audit_service.record(
+        db,
+        invitation.org_id,
+        accepting_user.id,
+        "invitation.accepted",
+        resource_type="invitation",
+        resource_id=invitation.id,
+    )
     await db.commit()
     await db.refresh(org)
     logger.info("invitation accepted: %s by %s", invitation.id, accepting_user.id)
@@ -239,7 +267,11 @@ async def create_custom_role(
 
 
 async def update_membership_role(
-    db: AsyncSession, org_id: uuid.UUID, membership_id: uuid.UUID, role_id: uuid.UUID
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    membership_id: uuid.UUID,
+    role_id: uuid.UUID,
+    actor_id: uuid.UUID,
 ) -> MemberRead:
     role = await db.get(Role, role_id)
     if role is None or (role.org_id is not None and role.org_id != org_id):
@@ -253,6 +285,15 @@ async def update_membership_role(
         raise NotFoundError("member not found")
 
     membership.role_id = role_id
+    await audit_service.record(
+        db,
+        org_id,
+        actor_id,
+        "member.role_updated",
+        resource_type="membership",
+        resource_id=membership.id,
+        metadata={"role_id": str(role_id)},
+    )
     await db.commit()
     logger.info("membership %s role changed to %s in org %s", membership_id, role_id, org_id)
 

@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.core.tenancy import set_tenant_context
 from app.modules.ai.providers import (
     Message,
     TextDelta,
@@ -18,6 +19,7 @@ from app.modules.ai.providers import (
     get_provider,
 )
 from app.modules.ai.schemas import OrgAIConfigUpdate
+from app.modules.audit import service as audit_service
 from app.modules.orgs import service as orgs_service
 
 logger = logging.getLogger("helix.ai")
@@ -71,7 +73,7 @@ async def resolve_org_ai_config(db: AsyncSession, org_id: uuid.UUID) -> OrgAICon
 
 
 async def update_org_ai_config(
-    db: AsyncSession, org_id: uuid.UUID, update: OrgAIConfigUpdate
+    db: AsyncSession, org_id: uuid.UUID, update: OrgAIConfigUpdate, actor_id: uuid.UUID
 ) -> OrgAIConfig:
     patch: dict[str, str | float | None] = {}
     if update.provider is not None:
@@ -81,6 +83,22 @@ async def update_org_ai_config(
     if "monthly_cost_cap_usd" in update.model_fields_set:
         patch["ai_monthly_cost_cap_usd"] = update.monthly_cost_cap_usd
     await orgs_service.update_org_settings(db, org_id, patch)
+    # update_org_settings already committed (it's a shared utility other
+    # callers -- e.g. billing's plan-cap reset -- also use, so it isn't
+    # this function's place to hold that commit open) -- a fresh commit
+    # here for the audit row is the simplest correct option, at the cost
+    # of one extra round trip for a config change, not a hot path.
+    await set_tenant_context(db, org_id)
+    await audit_service.record(
+        db,
+        org_id,
+        actor_id,
+        "ai_config.updated",
+        resource_type="org",
+        resource_id=org_id,
+        metadata=patch,
+    )
+    await db.commit()
     return await resolve_org_ai_config(db, org_id)
 
 

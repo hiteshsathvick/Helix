@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db
 from app.modules.ai import service
 from app.modules.ai.schemas import OrgAIConfigRead, OrgAIConfigUpdate
+from app.modules.auth.dependencies import get_current_user
+from app.modules.auth.models import User
 from app.modules.orgs.dependencies import require_org_member, require_permission
 from app.modules.orgs.system_roles import PERMISSION_AI_CONFIG_MANAGE
 
@@ -32,6 +34,7 @@ async def get_ai_config(
 async def update_ai_config(
     body: OrgAIConfigUpdate,
     org_id: uuid.UUID = Depends(require_permission(PERMISSION_AI_CONFIG_MANAGE)),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OrgAIConfigRead:
-    return _to_read(await service.update_org_ai_config(db, org_id, body))
+    return _to_read(await service.update_org_ai_config(db, org_id, body, current_user.id))

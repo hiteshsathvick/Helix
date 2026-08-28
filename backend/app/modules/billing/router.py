@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.deps import get_db
 from app.core.errors import UnauthorizedError
+from app.modules.auth.dependencies import get_current_user
+from app.modules.auth.models import User
 from app.modules.billing import service, stripe_client
 from app.modules.billing.schemas import (
     BillingSummary,
@@ -35,18 +37,20 @@ async def get_billing(
 async def create_checkout(
     body: CheckoutRequest,
     org_id: uuid.UUID = Depends(require_permission(PERMISSION_BILLING_MANAGE)),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CheckoutResponse:
-    checkout_url = await service.start_checkout(db, org_id, body.plan)
+    checkout_url = await service.start_checkout(db, org_id, body.plan, current_user.id)
     return CheckoutResponse(checkout_url=checkout_url)
 
 
 @router.post("/billing/cancel", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_billing(
     org_id: uuid.UUID = Depends(require_permission(PERMISSION_BILLING_MANAGE)),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await service.cancel_subscription(db, org_id)
+    await service.cancel_subscription(db, org_id, current_user.id)
 
 
 @router.get("/usage", response_model=UsageSummary)

@@ -24,6 +24,15 @@ PERMISSION_CONNECTORS_MANAGE = "connectors:manage"
 # any org-configuration permission an Admin already holds, and Stripe
 # itself treats "who can change the plan" as an owner-level decision.
 PERMISSION_BILLING_MANAGE = "billing:manage"
+# Audit and analytics (Phase 17) are Owner/Admin visibility, same tier as
+# most of _SHARED_ADMIN_PERMISSIONS below -- but kept as two distinct
+# permission strings, not reused from something else, since "who can see
+# the raw audit trail" and "who can see usage analytics" are different
+# concerns even when today's answer to both is the same two roles (SPEC.md
+# §15's fine-grained-permissions style: agents:manage vs agents:run is the
+# same pattern -- same practical audience, still separate strings).
+PERMISSION_AUDIT_READ = "audit:read"
+PERMISSION_ANALYTICS_READ = "analytics:read"
 
 # Owner and Admin were identical before billing existed (SPEC.md §14
 # requires each permission to be listed explicitly rather than an implicit
@@ -46,6 +55,8 @@ _SHARED_ADMIN_PERMISSIONS = [
     # or workflow, and there's no legitimate "wants to sync but not
     # configure" persona -- Owner/Admin only, not Member.
     PERMISSION_CONNECTORS_MANAGE,
+    PERMISSION_AUDIT_READ,
+    PERMISSION_ANALYTICS_READ,
 ]
 _FULL_PERMISSIONS = [*_SHARED_ADMIN_PERMISSIONS, PERMISSION_BILLING_MANAGE]
 _MEMBER_PERMISSIONS = [

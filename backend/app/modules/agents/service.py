@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -15,6 +15,7 @@ from app.modules.agents.models import Agent, AgentRun, AgentStep
 from app.modules.agents.tools import TOOLS, ToolContext
 from app.modules.ai import cost_guard
 from app.modules.ai import service as ai_service
+from app.modules.audit import service as audit_service
 from app.modules.billing import service as billing_service
 
 logger = logging.getLogger("helix.agents")
@@ -97,6 +98,9 @@ async def create_run(
         status="pending",
     )
     db.add(run)
+    await audit_service.record(
+        db, org_id, user_id, "agent.run_created", resource_type="agent_run", resource_id=run.id
+    )
     await db.commit()
     await set_tenant_context(db, org_id)
     await db.refresh(run)
@@ -104,6 +108,20 @@ async def create_run(
     await enqueue_agent_run(run.id, org_id, agent_id)
     logger.info("agent run enqueued: %s for agent %s", run.id, agent_id)
     return run
+
+
+async def get_run_status_counts(
+    db: AsyncSession, org_id: uuid.UUID, since: datetime
+) -> dict[str, int]:
+    """Agent success-rate figure for analytics/service.py -- called there
+    rather than analytics querying `agent_runs` directly (CLAUDE.md §3)."""
+    await set_tenant_context(db, org_id)
+    result = await db.execute(
+        select(AgentRun.status, func.count())
+        .where(AgentRun.org_id == org_id, AgentRun.created_at >= since)
+        .group_by(AgentRun.status)
+    )
+    return {status: count for status, count in result.all()}
 
 
 async def list_runs(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> list[AgentRun]:
