@@ -157,7 +157,9 @@ jobs:
         working-directory: backend
       - run: alembic upgrade head
         working-directory: backend
-      - run: pytest
+      # Report-only visibility (SPEC.md §32: "coverage focus on critical
+      # paths, not a vanity percentage") -- no --cov-fail-under gate here.
+      - run: pytest --cov=app --cov-report=term-missing
         working-directory: backend
 
   frontend-test:
@@ -206,6 +208,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
+      # Phase 20: the assistant/agents e2e specs need a real LLM call to
+      # exercise the streaming/tool-calling UI, but CI has no Anthropic key
+      # (and shouldn't spend real API money per run) -- the mock provider
+      # (ai/providers.py) gives deterministic, zero-cost answers instead.
+      # Only overridden here, not in .env.example itself: a real deployment
+      # must still default to a real provider.
+      - run: echo "AI_DEFAULT_PROVIDER=mock" >> .env
       - run: docker compose up -d --build --wait
       - uses: actions/setup-node@v4
         with:

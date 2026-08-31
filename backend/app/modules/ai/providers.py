@@ -304,6 +304,54 @@ class OllamaProvider(OpenAIProvider):
         super().__init__(api_key="ollama", base_url=base_url)
 
 
+class MockProvider(LLMProvider):
+    """Deterministic, zero-cost provider for e2e/load-testing (Phase 20) --
+    exercises the real streaming/tool-calling wiring end-to-end without a
+    real LLM call. Reachable only via the operator-level
+    AI_DEFAULT_PROVIDER setting: `ai/schemas.py`'s KNOWN_PROVIDERS
+    deliberately excludes "mock", so no org can ever select it through
+    `PUT /orgs/{id}/ai-config` -- this is a test/CI-only knob, not a
+    user-facing option."""
+
+    name = "mock"
+    _ANSWER = "This is a mock response from the test LLM provider."
+
+    async def stream(
+        self, system: str, messages: list[Message], model: str, max_tokens: int
+    ) -> AsyncIterator[TextDelta | UsageInfo]:
+        for word in self._ANSWER.split(" "):
+            yield TextDelta(word + " ")
+        yield UsageInfo(input_tokens=10, output_tokens=len(self._ANSWER.split(" ")))
+
+    async def complete_with_tools(
+        self,
+        system: str,
+        messages: list[Message],
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec],
+    ) -> ToolCompletionResult:
+        # Always answers directly, never calls a tool -- keeps agent/
+        # workflow-AI-node runs a deterministic single step, matching the
+        # default mock in test_agents.py/test_workflows.py.
+        return ToolCompletionResult(
+            text=self._ANSWER,
+            tool_calls=[],
+            assistant_message={"role": "assistant", "content": self._ANSWER},
+            usage=UsageInfo(input_tokens=10, output_tokens=len(self._ANSWER.split(" "))),
+        )
+
+    def tool_result_messages(
+        self, tool_calls: list[ToolCall], results: dict[str, dict[str, Any]]
+    ) -> list[Message]:
+        # Never actually invoked (complete_with_tools above never returns a
+        # tool call to run), but required by the LLMProvider interface.
+        return [
+            {"role": "tool", "tool_call_id": call.id, "content": json.dumps(results[call.id])}
+            for call in tool_calls
+        ]
+
+
 @lru_cache
 def get_provider(name: str) -> LLMProvider:
     settings = get_settings()
@@ -313,4 +361,6 @@ def get_provider(name: str) -> LLMProvider:
         return OpenAIProvider(settings.openai_api_key)
     if name == "ollama":
         return OllamaProvider(settings.ollama_base_url)
+    if name == "mock":
+        return MockProvider()
     raise ValueError(f"unknown AI provider: {name!r}")

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import uuid
 
@@ -11,7 +12,8 @@ from app.core.redis import get_redis_client
 from app.core.storage import get_s3_client
 from app.core.tenancy import set_tenant_context
 from app.main import app
-from app.modules.documents.models import Document, DocumentACL
+from app.modules.documents import service as documents_service
+from app.modules.documents.models import Document, DocumentACL, Source
 from app.modules.orgs.system_roles import VIEWER_ROLE_ID
 
 AUTH_PREFIX = "/api/v1/auth"
@@ -123,6 +125,38 @@ async def test_upload_creates_org_wide_acl(client: TestClient) -> None:
     assert len(acls) == 1
     assert acls[0].principal_type == "org"
     assert acls[0].principal_id == uuid.UUID(org_id)
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_manual_source_survives_a_concurrent_race(client: TestClient) -> None:
+    # Regression test (Phase 20, migration 11400a085f70): two concurrent
+    # first-uploads to the same brand-new org used to race
+    # get_or_create_manual_source's check-then-insert and raise
+    # sqlalchemy.exc.MultipleResultsFound on every request after -- found
+    # via a real k6 load test (infra/load/ingestion.js), not by an
+    # automated test, which is exactly why this one exists now.
+    token, org_id = _register_login_and_create_org(client)
+
+    async def _get_or_create() -> uuid.UUID:
+        async with session_factory() as session:
+            await set_tenant_context(session, uuid.UUID(org_id))
+            source = await documents_service.get_or_create_manual_source(session, uuid.UUID(org_id))
+            await session.commit()
+            return source.id
+
+    results = await asyncio.gather(_get_or_create(), _get_or_create())
+    assert results[0] == results[1]
+
+    async with session_factory() as session:
+        await set_tenant_context(session, uuid.UUID(org_id))
+        result = await session.execute(
+            select(Source).where(
+                Source.org_id == uuid.UUID(org_id),
+                Source.type == "manual",
+                Source.deleted_at.is_(None),
+            )
+        )
+        assert len(list(result.scalars().all())) == 1
 
 
 def test_delete_is_soft_and_hides_from_listing(client: TestClient) -> None:

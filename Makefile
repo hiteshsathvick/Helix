@@ -1,4 +1,4 @@
-.PHONY: up down logs test test-frontend test-e2e migrate lint seed
+.PHONY: up down logs test test-frontend test-e2e coverage migrate lint seed
 
 up:
 	docker compose up --build
@@ -15,9 +15,14 @@ test:
 test-frontend:
 	docker compose run --rm frontend npm test
 
+coverage:
+	docker compose run --rm api pytest --cov=app --cov-report=term-missing
+
 # Needs the full stack up first (`make up`, in another terminal) — unlike
 # test/test-frontend, Playwright drives a real browser against the running
-# app + api, not an isolated container.
+# app + api, not an isolated container. The assistant/agents specs need the
+# mock LLM provider (Phase 20) — set AI_DEFAULT_PROVIDER=mock in .env
+# before `make up` to run those two.
 test-e2e:
 	cd frontend && npm run test:e2e
 

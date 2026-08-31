@@ -53,6 +53,10 @@ def _default_model_for(provider: str, settings: Settings) -> str:
         "anthropic": settings.llm_model,
         "openai": settings.openai_model,
         "ollama": settings.ollama_model,
+        # MockProvider (ai/providers.py, Phase 20) ignores the model name
+        # entirely -- this placeholder just has to be a non-empty string so
+        # AI_DEFAULT_PROVIDER=mock doesn't KeyError here.
+        "mock": "mock-model",
     }[provider]
 
 

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import UploadFile
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
@@ -18,17 +19,46 @@ from app.modules.ingestion.models import Job
 logger = logging.getLogger("helix.documents")
 
 
-async def get_or_create_manual_source(db: AsyncSession, org_id: uuid.UUID) -> Source:
-    result = await db.execute(
-        select(Source).where(Source.org_id == org_id, Source.type == "manual")
+def _manual_source_query(org_id: uuid.UUID):
+    return select(Source).where(
+        Source.org_id == org_id, Source.type == "manual", Source.deleted_at.is_(None)
     )
+
+
+async def get_or_create_manual_source(db: AsyncSession, org_id: uuid.UUID) -> Source:
+    result = await db.execute(_manual_source_query(org_id))
     source = result.scalar_one_or_none()
     if source is not None:
         return source
 
     source = Source(org_id=org_id, type="manual", name="Manual uploads")
     db.add(source)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Lost the race to a concurrent first-upload for this org --
+        # ix_sources_org_id_manual_singleton (Phase 20 migration
+        # 11400a085f70) means the loser always gets exactly this error,
+        # never a duplicate row. A SAVEPOINT (db.begin_nested()) looks
+        # like the more surgical fix here, but doesn't actually leave the
+        # session usable afterward under this SQLAlchemy/asyncpg stack --
+        # confirmed empirically (PendingRollbackError on the very next
+        # statement) before falling back to this plain rollback, which
+        # does. Callers must treat every *other* object already loaded in
+        # this session as expired after this call returns (see
+        # upload_document, which captures uploader.id before calling this
+        # rather than reading it afterward) -- rollback() expires the
+        # whole session's identity map, not just this insert.
+        await db.rollback()
+        # set_tenant_context uses set_config(..., is_local=true) -- a
+        # transaction-scoped SET LOCAL, wiped by the rollback above like
+        # everything else in that transaction. Without re-setting it here,
+        # RLS hides even the winner's own now-committed row from the
+        # re-query below (same class of bug as the create-then-refresh
+        # pattern documented on the agents module).
+        await set_tenant_context(db, org_id)
+        result = await db.execute(_manual_source_query(org_id))
+        source = result.scalar_one()
     return source
 
 
@@ -111,6 +141,14 @@ async def delete_source(db: AsyncSession, org_id: uuid.UUID, source_id: uuid.UUI
 async def upload_document(
     db: AsyncSession, org_id: uuid.UUID, uploader: User, file: UploadFile
 ) -> Document:
+    # Captured before get_or_create_manual_source, not read off `uploader`
+    # afterward: a lost race there rolls back this session (Phase 20),
+    # which expires every already-loaded object in it -- including
+    # `uploader`, loaded earlier by the get_current_user dependency in
+    # this same session. Accessing uploader.id post-rollback would trigger
+    # an implicit re-fetch that can itself fail under the same concurrent
+    # load; a plain UUID captured now has no such lifecycle to worry about.
+    uploader_id = uploader.id
     source = await get_or_create_manual_source(db, org_id)
 
     document_id = uuid.uuid4()
@@ -128,7 +166,7 @@ async def upload_document(
         mime=file.content_type or "application/octet-stream",
         storage_key=storage_key,
         checksum=checksum,
-        uploaded_by_user_id=uploader.id,
+        uploaded_by_user_id=uploader_id,
     )
     db.add(document)
     await db.flush()
@@ -148,7 +186,7 @@ async def upload_document(
     # RLS-protected, so refresh() would otherwise come back empty.
     await set_tenant_context(db, org_id)
     await db.refresh(document)
-    logger.info("document uploaded: %s in org %s by %s", document.id, org_id, uploader.id)
+    logger.info("document uploaded: %s in org %s by %s", document.id, org_id, uploader_id)
 
     await ingestion_service.trigger_ingestion(db, org_id, document.id)
     return document

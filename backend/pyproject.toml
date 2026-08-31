@@ -42,6 +42,7 @@ dependencies = [
 dev = [
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.24,<0.25",
+    "pytest-cov>=5.0,<6",
     "ruff>=0.6,<0.7",
     "mypy>=1.11,<2",
 ]
@@ -73,6 +74,15 @@ exclude = ["alembic/versions"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["app"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/alembic/versions/*", "app/tests/*", "*/tests/*"]
+
+[tool.coverage.report]
+# SPEC.md §32: coverage focus on critical paths, not a vanity percentage --
+# this is visibility, not a gate, so no fail_under here.
+skip_empty = true
 
 [build-system]
 requires = ["setuptools>=68"]

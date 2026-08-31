@@ -3,13 +3,14 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.core.errors import QuotaExceededError
 from app.core.redis import get_redis_client
 from app.main import app
 from app.modules.ai import cost_guard
 from app.modules.ai import service as ai_service
 from app.modules.ai.prompts import ASSISTANT_SYSTEM_PROMPT_CURRENT, get_prompt
-from app.modules.ai.providers import compute_cost
+from app.modules.ai.providers import MockProvider, ToolSpec, compute_cost, get_provider
 
 AUTH_PREFIX = "/api/v1/auth"
 ORGS_PREFIX = "/api/v1/orgs"
@@ -76,6 +77,63 @@ def test_compute_cost_known_model():
 
 def test_compute_cost_unknown_model_is_free():
     assert compute_cost("some-unpriced-model", input_tokens=1000, output_tokens=1000) == 0.0
+
+
+# --- unit: mock provider (Phase 20 -- deterministic e2e/load-test LLM) ---
+
+
+def test_get_provider_mock_returns_mock_provider():
+    assert isinstance(get_provider("mock"), MockProvider)
+
+
+def test_default_model_for_supports_mock_provider():
+    # Regression test: every other test in this file monkeypatches
+    # ai_service.stream_completion directly (see _mock_llm above), which
+    # bypasses resolve_org_ai_config -> _default_model_for entirely -- that
+    # let AI_DEFAULT_PROVIDER=mock KeyError in _default_model_for's lookup
+    # dict slip past the whole suite. Found via manual verification
+    # (Phase 20), not by an automated test, which is exactly why this one
+    # exists now.
+    from app.modules.ai.service import _default_model_for
+
+    assert _default_model_for("mock", get_settings())
+
+
+def test_mock_provider_not_selectable_via_org_ai_config(client: TestClient) -> None:
+    token, org_id = _register_login_and_create_org(client)
+    response = client.put(
+        f"{ORGS_PREFIX}/{org_id}/ai-config",
+        json={"provider": "mock"},
+        headers=_auth_headers(token),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_stream_yields_text_then_usage():
+    provider = MockProvider()
+    events = [event async for event in provider.stream("system", [], "any-model", 100)]
+
+    from app.modules.ai.providers import TextDelta, UsageInfo
+
+    text = "".join(e.text for e in events if isinstance(e, TextDelta))
+    assert text.strip() == MockProvider._ANSWER
+    assert isinstance(events[-1], UsageInfo)
+    assert events[-1].output_tokens > 0
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_complete_with_tools_never_calls_a_tool():
+    provider = MockProvider()
+    result = await provider.complete_with_tools(
+        "system",
+        [],
+        "any-model",
+        100,
+        tools=[ToolSpec(name="search", description="search", parameters={"type": "object"})],
+    )
+    assert result.tool_calls == []
+    assert result.text == MockProvider._ANSWER
 
 
 def test_prompt_registry_renders_current_version():
