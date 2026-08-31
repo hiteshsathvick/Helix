@@ -54,6 +54,58 @@ services:
       timeout: 3s
       retries: 10
 
+  # --- Observability (SPEC.md §30, Phase 21) ---
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC -- api/worker export traces here
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./infra/otel/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200" # Tempo's own query API, Grafana's datasource URL
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      # Local dev only -- change before any real deployment (SPEC.md §29
+      # secrets guidance applies to this too, even though it's not wired
+      # through core/config.py's own guard since Grafana owns its own auth).
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: mailpit:1025
+      GF_SMTP_FROM_ADDRESS: alerts@helix.local
+      GF_SMTP_SKIP_VERIFY: "true"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000" # :3000 is the frontend's port on the host already
+    depends_on:
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+      mailpit:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -74,6 +126,8 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
@@ -87,6 +141,8 @@ services:
     command: arq app.workers.run.WorkerSettings --watch /srv
     env_file:
       - .env
+    ports:
+      - "9100:9100" # prometheus_client's own server (workers/run.py) -- scraped by prometheus, see infra/prometheus/prometheus.yml
     volumes:
       - ./backend:/srv
     depends_on:
@@ -98,6 +154,8 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       disable: true
 
@@ -122,3 +180,6 @@ volumes:
   postgres_data:
   minio_data:
   frontend_node_modules:
+  tempo_data:
+  prometheus_data:
+  grafana_data:

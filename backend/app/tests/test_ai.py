@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.core.errors import QuotaExceededError
+from app.core.metrics import llm_cost_usd_total, llm_requests_total, llm_tokens_total
 from app.core.redis import get_redis_client
 from app.main import app
 from app.modules.ai import cost_guard
@@ -35,6 +36,16 @@ def client():
 async def _fake_stream_completion(system, messages, max_tokens, *, provider=None, model=None):
     yield ai_service.TextDelta("An answer.")
     yield ai_service.UsageInfo(input_tokens=100, output_tokens=20)
+
+
+# Captured before _mock_llm's autouse monkeypatch can ever run (module
+# collection time, not per-test) -- the metrics tests below need the real
+# stream_completion/complete_with_tools (span + Prometheus recording,
+# Phase 21), not the fake every other test in this file deliberately gets.
+# monkeypatch.setattr only rebinds the *module attribute*; this separate
+# reference to the original function object is untouched by that.
+_real_stream_completion = ai_service.stream_completion
+_real_complete_with_tools = ai_service.complete_with_tools
 
 
 @pytest.fixture(autouse=True)
@@ -134,6 +145,47 @@ async def test_mock_provider_complete_with_tools_never_calls_a_tool():
     )
     assert result.tool_calls == []
     assert result.text == MockProvider._ANSWER
+
+
+# --- LLM metrics (Phase 21, SPEC.md §30) ---
+
+
+@pytest.mark.asyncio
+async def test_stream_completion_records_llm_metrics():
+    requests_before = llm_requests_total.labels("mock", "mock-model", "success")._value.get()
+    tokens_before = llm_tokens_total.labels("mock", "mock-model", "output")._value.get()
+    cost_before = llm_cost_usd_total.labels("mock", "mock-model")._value.get()
+
+    events = [
+        event
+        async for event in _real_stream_completion(
+            "system", [], 100, provider="mock", model="mock-model"
+        )
+    ]
+
+    assert any(isinstance(e, ai_service.UsageInfo) for e in events)
+    assert llm_requests_total.labels("mock", "mock-model", "success")._value.get() == (
+        requests_before + 1
+    )
+    assert llm_tokens_total.labels("mock", "mock-model", "output")._value.get() > tokens_before
+    # Mock provider's cost is $0 (unpriced model, compute_cost's default) --
+    # asserting the counter didn't move backwards / errored is the
+    # meaningful check here, not that it increased.
+    assert llm_cost_usd_total.labels("mock", "mock-model")._value.get() == cost_before
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_records_llm_metrics():
+    requests_before = llm_requests_total.labels("mock", "mock-model", "success")._value.get()
+
+    result = await _real_complete_with_tools(
+        "system", [], 100, [], provider="mock", model="mock-model"
+    )
+
+    assert result.usage.output_tokens > 0
+    assert llm_requests_total.labels("mock", "mock-model", "success")._value.get() == (
+        requests_before + 1
+    )
 
 
 def test_prompt_registry_renders_current_version():

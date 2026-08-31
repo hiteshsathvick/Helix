@@ -1,0 +1,64 @@
+{
+  "title": "Helix - Worker & Queues",
+  "uid": "helix-worker",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Job rate by task and outcome",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(helix_worker_jobs_total[5m])) by (task, status)",
+          "legendFormat": "{{task}} ({{status}})"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "p95 job duration by task",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(helix_worker_job_duration_seconds_bucket[5m])) by (le, task))",
+          "legendFormat": "{{task}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Queue depth (arq:queue)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "helix_queue_depth{job=\"helix-api\"}",
+          "legendFormat": "pending + deferred jobs"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "DLQ growth by task",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(helix_dlq_jobs_total[5m])) by (task)",
+          "legendFormat": "{{task}}"
+        }
+      ]
+    }
+  ]
+}

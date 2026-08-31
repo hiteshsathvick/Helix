@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import get_settings
+from app.core.metrics import dlq_jobs_total
 from app.core.queue import enqueue_workflow_run_deferred
 from app.core.tenancy import set_tenant_context
 from app.modules.agents.tools import TOOLS, ToolContext
@@ -250,6 +251,7 @@ async def _execute_node(
         step.error = str(exc)
         if step.attempts >= settings.workflow_step_max_attempts:
             step.status = "dlq"
+            dlq_jobs_total.labels("execute_workflow_run_task").inc()
             logger.error(
                 "workflow step exhausted retries: run=%s node=%s error=%s", run.id, node.id, exc
             )

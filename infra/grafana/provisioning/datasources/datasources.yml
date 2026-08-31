@@ -1,0 +1,24 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    uid: prometheus
+    isDefault: true
+    jsonData:
+      # Lets a metric with an exemplar (a sample point tagged with the
+      # trace that produced it) link straight to that trace in Tempo --
+      # the concrete mechanism behind "a single trace follows a request"
+      # being explorable from a dashboard, not just from raw trace IDs in
+      # logs (SPEC.md §30).
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo

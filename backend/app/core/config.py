@@ -172,6 +172,17 @@ class Settings(BaseSettings):
     webhook_delivery_max_job_attempts: int = 5
     webhook_delivery_timeout_seconds: float = 10.0
 
+    # Observability (SPEC.md §30, Phase 21). No paid service -- points at
+    # the local otel-collector service by default. otel_service_name
+    # distinguishes the api and worker processes as separate services in
+    # the same trace, matching how workers/run.py sets it.
+    otel_exporter_otlp_endpoint: str = "http://otel-collector:4317"
+    otel_service_name: str = "helix-api"
+    # Exception tracking -- initialized only if non-empty (main.py), same
+    # opt-in pattern as stripe_secret_key above. Free tier at sentry.io
+    # covers this project's scale; no account needed unless you set this.
+    sentry_dsn: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

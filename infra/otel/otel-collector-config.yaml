@@ -1,0 +1,28 @@
+# Traces only (SPEC.md §30) -- api/worker send OTLP here (core/tracing.py's
+# otel_exporter_otlp_endpoint), this fans out to Tempo. Metrics don't route
+# through here: main.py exposes them directly at /metrics (prometheus-
+# fastapi-instrumentator + core/metrics.py's custom collectors), and
+# Prometheus scrapes that endpoint straight (infra/prometheus/prometheus.yml)
+# -- a pull-based scrape is simpler than adding a second, push-based metrics
+# pipeline through the collector for the same data.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]

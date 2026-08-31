@@ -5,6 +5,7 @@ from typing import Any
 from app.core.config import get_settings
 from app.core.db import session_factory
 from app.core.events import publish_event
+from app.core.metrics import dlq_jobs_total
 from app.core.tenancy import set_tenant_context
 from app.modules.documents import service as documents_service
 from app.modules.ingestion.models import Job
@@ -80,6 +81,7 @@ async def ingest_document_task(
                 job.error = str(exc)
                 if is_last_attempt:
                     job.status = "dlq"
+                    dlq_jobs_total.labels("ingest_document_task").inc()
                     await documents_service.mark_document_status(
                         db, org_uuid, document_uuid, "failed"
                     )

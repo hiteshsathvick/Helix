@@ -1,13 +1,22 @@
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+from opentelemetry.trace import Span
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.core.metrics import (
+    llm_cost_usd_total,
+    llm_request_duration_seconds,
+    llm_requests_total,
+    llm_tokens_total,
+)
 from app.core.tenancy import set_tenant_context
+from app.core.tracing import tracer
 from app.modules.ai.providers import (
     Message,
     TextDelta,
@@ -46,6 +55,19 @@ class OrgAIConfig:
     provider: str
     model: str
     monthly_cost_cap_usd: float | None
+
+
+def _record_usage(span: Span, provider_name: str, model_name: str, usage: UsageInfo) -> None:
+    """Shared by stream_completion and complete_with_tools -- the one place
+    a call's token/cost numbers become both span attributes and Prometheus
+    counters, so the two never drift out of sync with each other."""
+    cost = compute_cost(model_name, usage.input_tokens, usage.output_tokens)
+    span.set_attribute("ai.input_tokens", usage.input_tokens)
+    span.set_attribute("ai.output_tokens", usage.output_tokens)
+    span.set_attribute("ai.cost_usd", cost)
+    llm_tokens_total.labels(provider_name, model_name, "input").inc(usage.input_tokens)
+    llm_tokens_total.labels(provider_name, model_name, "output").inc(usage.output_tokens)
+    llm_cost_usd_total.labels(provider_name, model_name).inc(cost)
 
 
 def _default_model_for(provider: str, settings: Settings) -> str:
@@ -125,8 +147,22 @@ async def stream_completion(
     provider_name = provider or settings.ai_default_provider
     model_name = model or _default_model_for(provider_name, settings)
     llm = get_provider(provider_name)
-    async for event in llm.stream(system, messages, model_name, max_tokens):
-        yield event
+    start = time.perf_counter()
+    status = "error"
+    with tracer.start_as_current_span("ai.stream_completion") as span:
+        span.set_attribute("ai.provider", provider_name)
+        span.set_attribute("ai.model", model_name)
+        try:
+            async for event in llm.stream(system, messages, model_name, max_tokens):
+                if isinstance(event, UsageInfo):
+                    _record_usage(span, provider_name, model_name, event)
+                yield event
+            status = "success"
+        finally:
+            llm_request_duration_seconds.labels(provider_name, model_name).observe(
+                time.perf_counter() - start
+            )
+            llm_requests_total.labels(provider_name, model_name, status).inc()
 
 
 async def complete_with_tools(
@@ -144,7 +180,21 @@ async def complete_with_tools(
     provider_name = provider or settings.ai_default_provider
     model_name = model or _default_model_for(provider_name, settings)
     llm = get_provider(provider_name)
-    return await llm.complete_with_tools(system, messages, model_name, max_tokens, tools)
+    start = time.perf_counter()
+    status = "error"
+    with tracer.start_as_current_span("ai.complete_with_tools") as span:
+        span.set_attribute("ai.provider", provider_name)
+        span.set_attribute("ai.model", model_name)
+        try:
+            result = await llm.complete_with_tools(system, messages, model_name, max_tokens, tools)
+            _record_usage(span, provider_name, model_name, result.usage)
+            status = "success"
+            return result
+        finally:
+            llm_request_duration_seconds.labels(provider_name, model_name).observe(
+                time.perf_counter() - start
+            )
+            llm_requests_total.labels(provider_name, model_name, status).inc()
 
 
 def tool_result_messages(

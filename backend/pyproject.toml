@@ -36,6 +36,31 @@ dependencies = [
     # (SPEC.md §16) -- the official SDK is the boring, correct choice over
     # hand-rolling Stripe's HMAC-timestamp webhook scheme.
     "stripe>=10,<11",
+    # Observability (SPEC.md §30, Phase 21). SDK + OTLP exporter talk to the
+    # otel-collector service; the three instrumentation packages are the
+    # ones this app's actual dependency set needs auto-instrumented (ASGI
+    # request lifecycle, SQLAlchemy, redis-py) -- no blanket "instrument
+    # everything" meta-package.
+    "opentelemetry-sdk>=1.27,<2",
+    "opentelemetry-exporter-otlp>=1.27,<2",
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.49",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0,<0.49",
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.49",
+    # Automatic HTTP request duration/count/in-flight metrics + /metrics
+    # endpoint -- the standard, minimal-code way to get FastAPI on
+    # Prometheus rather than hand-rolling the ASGI middleware.
+    "prometheus-fastapi-instrumentator>=7.0,<8",
+    # Exception tracking (SPEC.md §30) -- initialized only if SENTRY_DSN is
+    # set (core/config.py default ""), same opt-in pattern as stripe_secret_key
+    # above. No account needed unless you actually set a DSN.
+    "sentry-sdk[fastapi]>=2.14,<3",
+    # opentelemetry-instrumentation (a transitive dep of every instrumentor
+    # package above) imports pkg_resources at module load time. pkg_resources
+    # is part of setuptools, but recent setuptools releases have dropped it
+    # entirely (confirmed: 84.0.0 no longer ships it) -- upper-bounded here,
+    # not just floored, specifically so pip can't resolve one of those and
+    # silently break every otel-instrumentation import.
+    "setuptools>=68,<75",
 ]
 
 [project.optional-dependencies]

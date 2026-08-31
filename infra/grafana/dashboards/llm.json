@@ -1,0 +1,65 @@
+{
+  "title": "Helix - LLM",
+  "uid": "helix-llm",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate by provider/model",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(helix_llm_requests_total[5m])) by (provider, model, status)",
+          "legendFormat": "{{provider}}/{{model}} ({{status}})"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "p95 latency by provider/model",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(helix_llm_request_duration_seconds_bucket[5m])) by (le, provider, model))",
+          "legendFormat": "{{provider}}/{{model}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Token throughput by provider/model/direction",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(helix_llm_tokens_total[5m])) by (provider, model, direction)",
+          "legendFormat": "{{provider}}/{{model}} ({{direction}})"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Hourly spend by provider/model",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(increase(helix_llm_cost_usd_total[1h])) by (provider, model)",
+          "legendFormat": "{{provider}}/{{model}}"
+        }
+      ]
+    }
+  ]
+}

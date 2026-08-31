@@ -1,0 +1,130 @@
+# Grafana unified alerting, file-provisioned (SPEC.md §30 "Alerts on error
+# rate, queue backlog, DLQ growth, and cost spikes"). Contact point is the
+# existing local Mailpit SMTP catcher (docker-compose.yml's grafana service
+# sets GF_SMTP_*) -- fired alerts land as real emails at
+# http://localhost:8025, the same place every other notification this app
+# sends already goes, no new paid alerting service.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: mailpit-email
+    receivers:
+      - uid: mailpit-email-receiver
+        type: email
+        settings:
+          addresses: ops@helix.local
+
+policies:
+  - orgId: 1
+    receiver: mailpit-email
+    group_by: ["alertname"]
+
+groups:
+  - orgId: 1
+    name: helix-alerts
+    folder: Helix
+    interval: 1m
+    rules:
+      - uid: helix-api-error-rate
+        title: API 5xx error rate high
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx error rate is above 5% over the last 5 minutes"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              refId: A
+              instant: true
+              expr: (sum(rate(http_requests_total{status=~"5.."}[5m])) or vector(0)) / (sum(rate(http_requests_total[5m])) or vector(1))
+          - refId: C
+            datasourceUid: "-100"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+
+      - uid: helix-queue-backlog
+        title: Job queue backlog
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The default arq queue has stayed above 100 pending/deferred jobs for 5 minutes"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 60, to: 0 }
+            model:
+              refId: A
+              instant: true
+              expr: helix_queue_depth{job="helix-api"}
+          - refId: C
+            datasourceUid: "-100"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [100] }
+
+      - uid: helix-dlq-growth
+        title: DLQ growing
+        condition: C
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A job moved to the DLQ in the last 15 minutes -- something is exhausting its retries"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 900, to: 0 }
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(helix_dlq_jobs_total[15m]))
+          - refId: C
+            datasourceUid: "-100"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      - uid: helix-llm-cost-spike
+        title: LLM hourly spend spike
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          # $10/hour is a starting placeholder, not a load-bearing number --
+          # tune to whatever's actually reasonable once real usage data
+          # exists (edit this rule's threshold, no code change needed).
+          summary: "LLM spend has exceeded $10 in the trailing hour"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 3600, to: 0 }
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(helix_llm_cost_usd_total[1h]))
+          - refId: C
+            datasourceUid: "-100"
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [10] }

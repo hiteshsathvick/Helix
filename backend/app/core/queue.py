@@ -4,6 +4,7 @@ from arq import create_pool
 from arq.connections import RedisSettings
 
 from app.core.config import get_settings
+from app.core.tracing import inject_trace_context
 
 
 async def enqueue_ingestion_job(
@@ -15,7 +16,13 @@ async def enqueue_ingestion_job(
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("ingest_document_task", str(job_id), str(org_id), str(document_id))
+        await pool.enqueue_job(
+            "ingest_document_task",
+            str(job_id),
+            str(org_id),
+            str(document_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -28,7 +35,12 @@ async def enqueue_event_dispatch(event_id: uuid.UUID, org_id: uuid.UUID) -> None
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("dispatch_domain_event_task", str(event_id), str(org_id))
+        await pool.enqueue_job(
+            "dispatch_domain_event_task",
+            str(event_id),
+            str(org_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -42,7 +54,12 @@ async def enqueue_workflow_run(run_id: uuid.UUID, org_id: uuid.UUID) -> None:
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("execute_workflow_run_task", str(run_id), str(org_id))
+        await pool.enqueue_job(
+            "execute_workflow_run_task",
+            str(run_id),
+            str(org_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -57,7 +74,11 @@ async def enqueue_workflow_run_deferred(
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
         await pool.enqueue_job(
-            "execute_workflow_run_task", str(run_id), str(org_id), _defer_by=defer_seconds
+            "execute_workflow_run_task",
+            str(run_id),
+            str(org_id),
+            _defer_by=defer_seconds,
+            _trace_context=inject_trace_context(),
         )
     finally:
         await pool.aclose()
@@ -70,7 +91,12 @@ async def enqueue_connector_sync(source_id: uuid.UUID, org_id: uuid.UUID) -> Non
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("sync_connector_task", str(source_id), str(org_id))
+        await pool.enqueue_job(
+            "sync_connector_task",
+            str(source_id),
+            str(org_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -84,7 +110,13 @@ async def enqueue_agent_run(run_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("run_agent_task", str(run_id), str(org_id), str(agent_id))
+        await pool.enqueue_job(
+            "run_agent_task",
+            str(run_id),
+            str(org_id),
+            str(agent_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -97,7 +129,12 @@ async def enqueue_webhook_dispatch(event_id: uuid.UUID, org_id: uuid.UUID) -> No
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("dispatch_webhooks_for_event_task", str(event_id), str(org_id))
+        await pool.enqueue_job(
+            "dispatch_webhooks_for_event_task",
+            str(event_id),
+            str(org_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -109,7 +146,12 @@ async def enqueue_webhook_delivery(delivery_id: uuid.UUID, org_id: uuid.UUID) ->
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("deliver_webhook_task", str(delivery_id), str(org_id))
+        await pool.enqueue_job(
+            "deliver_webhook_task",
+            str(delivery_id),
+            str(org_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()
 
@@ -121,6 +163,11 @@ async def enqueue_notification_send(notification_id: uuid.UUID, org_id: uuid.UUI
     settings = get_settings()
     pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await pool.enqueue_job("send_notification_task", str(notification_id), str(org_id))
+        await pool.enqueue_job(
+            "send_notification_task",
+            str(notification_id),
+            str(org_id),
+            _trace_context=inject_trace_context(),
+        )
     finally:
         await pool.aclose()

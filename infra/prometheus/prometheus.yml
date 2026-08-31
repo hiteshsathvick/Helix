@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # main.py's /metrics -- prometheus-fastapi-instrumentator's built-in HTTP
+  # metrics plus whichever of core/metrics.py's custom collectors run in
+  # this process (LLM cost/latency, queue depth; SPEC.md §30).
+  - job_name: helix-api
+    static_configs:
+      - targets: ["api:8000"]
+
+  # The worker process is not a web server -- it has no request/response
+  # cycle to hang a /metrics route on. workers/run.py instead starts a
+  # dedicated prometheus_client HTTP server (start_http_server(9100)) just
+  # for its own registry -- the two processes never share one in-memory
+  # registry, so this is a genuinely separate scrape target, not a
+  # duplicate of the line above. Carries worker_job_duration_seconds/
+  # worker_jobs_total/dlq_jobs_total.
+  - job_name: helix-worker
+    static_configs:
+      - targets: ["worker:9100"]
