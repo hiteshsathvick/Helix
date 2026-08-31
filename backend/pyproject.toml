@@ -22,7 +22,7 @@ dependencies = [
     "sentence-transformers>=3.0,<4",
     "pypdf>=4.3,<5",
     "beautifulsoup4>=4.12,<5",
-    "tiktoken>=0.7,<0.8",
+    "tiktoken>=0.7,<0.15",
     "anthropic>=0.40,<1",
     "openai>=1.50,<2",
     # Used directly by the agents module's http_request tool (SPEC.md §19),
