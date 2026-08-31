@@ -178,7 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - run: docker build -f infra/docker/backend.Dockerfile -t helix-backend:ci .
       - run: docker build -f infra/docker/frontend.Dockerfile -t helix-frontend:ci .
       # Scans the images just built, in this same job/runner (a fresh job
