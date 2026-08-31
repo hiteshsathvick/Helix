@@ -1,0 +1,129 @@
+name: Deploy
+
+# Separate from ci.yml on purpose: ci.yml gates a PR (lint/type/test/build/
+# scan, must all be green to merge); this workflow is what happens AFTER a
+# merge lands on main (SPEC.md §33 "on merge to main -> build/push image,
+# run migrations against staging, deploy to staging" / §36 "production
+# deploy is a gated manual approval") -- different trigger, different
+# concern, no reason to interleave the two in one file.
+#
+# Phase 22 scope (ADR 0003): "pipeline + IaC only, no live cloud" -- every
+# job below is real and runs on every push to main. build-and-push has no
+# missing-secret dependency (ghcr.io + the repo's own GITHUB_TOKEN, both
+# always available) and will actually push real images. deploy-staging and
+# deploy-prod are real deploy logic, but every step that needs a real
+# Render/database credential is individually gated on
+# `if: secrets.X != ''` so the job reports a clean skip (not a failure)
+# until this repo's owner adds those secrets and flips it on for real.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/helix-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/helix-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend-image: ${{ steps.tags.outputs.backend }}
+      frontend-image: ${{ steps.tags.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tags
+        run: |
+          echo "backend=${{ env.BACKEND_IMAGE }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/backend.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.backend }}
+            ${{ env.BACKEND_IMAGE }}:latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/frontend.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.frontend }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+
+  deploy-staging:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      # Migrations run before the new image is live, against the staging
+      # database directly -- same up-front-migration discipline as ci.yml's
+      # test job, just pointed at a real (not ephemeral) database. Skips
+      # cleanly when the secret isn't set yet (Phase 22 scope: no live
+      # cloud account exists to point this at).
+      - if: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL != '' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - if: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL != '' }}
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
+      - if: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL != '' }}
+        run: alembic upgrade head
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL }}
+      # Render deploy hooks are a single POST URL per service (created once
+      # a Render service exists, e.g. from infra/terraform/main.tf's
+      # render_web_service.api) -- simplest possible trigger, no Render API
+      # key or CLI needed for this step.
+      - if: ${{ secrets.RENDER_STAGING_API_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_STAGING_API_DEPLOY_HOOK }}"
+      - if: ${{ secrets.RENDER_STAGING_WORKER_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_STAGING_WORKER_DEPLOY_HOOK }}"
+      - if: ${{ secrets.RENDER_STAGING_FRONTEND_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_STAGING_FRONTEND_DEPLOY_HOOK }}"
+
+  # Gated on the "production" GitHub Environment, which is where the DoD's
+  # "prod deploy is one gated click" actually lives: a required reviewer
+  # configured on that Environment (Settings -> Environments -> production,
+  # a repo setting -- same "I don't change standing repo config myself"
+  # boundary as branch protection, documented in ADR 0003 instead) makes
+  # every run of this job pause for manual approval before its steps
+  # execute, with no custom approval scripting needed.
+  deploy-prod:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - if: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL != '' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - if: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL != '' }}
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
+      - if: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL != '' }}
+        run: alembic upgrade head
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL }}
+      - if: ${{ secrets.RENDER_PROD_API_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_PROD_API_DEPLOY_HOOK }}"
+      - if: ${{ secrets.RENDER_PROD_WORKER_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_PROD_WORKER_DEPLOY_HOOK }}"
+      - if: ${{ secrets.RENDER_PROD_FRONTEND_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_PROD_FRONTEND_DEPLOY_HOOK }}"

@@ -35,3 +35,14 @@ Thumbs.db
 
 # Docker
 *.pid
+
+# Terraform (infra/terraform) -- local state + provider plugin cache, never
+# committed (local backend, see main.tf's header comment). .terraform.lock.hcl
+# is intentionally NOT listed here -- that file should be committed once
+# `terraform init` has run, to pin provider versions across machines/CI.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
