@@ -818,3 +818,53 @@ async def test_create_run_blocked_once_org_cost_cap_is_reached(client: TestClien
     )
     assert third.status_code == 402
     assert third.json()["error"]["code"] == "quota_exceeded"
+
+
+# --- rate limits on triggering a run (Phase 19, SPEC.md §29) ---
+
+
+def test_manual_trigger_rate_limited_per_user(client: TestClient, monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "workflow_trigger_rate_limit_max_requests", 2)
+    token, org_id = _register_login_and_create_org(client)
+    workflow_id = _create_workflow(client, token, org_id)
+    _activate(client, token, org_id, workflow_id)
+
+    responses = [
+        client.post(
+            f"{ORGS_PREFIX}/{org_id}/workflows/{workflow_id}/runs",
+            json={"input": {}},
+            headers=_auth_headers(token),
+        )
+        for _ in range(3)
+    ]
+
+    assert [r.status_code for r in responses[:2]] == [202, 202]
+    assert responses[2].status_code == 429
+    assert responses[2].json()["error"]["code"] == "rate_limited"
+
+
+def test_webhook_trigger_rate_limited_per_client_ip(client: TestClient, monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "workflow_webhook_rate_limit_max_requests", 2)
+    token, org_id = _register_login_and_create_org(client)
+    workflow_id = _create_workflow(client, token, org_id)
+    _activate(client, token, org_id, workflow_id)
+    secret = client.get(
+        f"{ORGS_PREFIX}/{org_id}/workflows/{workflow_id}", headers=_auth_headers(token)
+    ).json()["webhook_secret"]
+
+    # The limit is checked before the secret, so even a wrong secret trips
+    # it -- brute-forcing the secret is exactly what this also has to bound.
+    responses = [
+        client.post(
+            f"/api/v1/webhooks/workflows/{org_id}/{workflow_id}",
+            json={},
+            headers={"X-Webhook-Secret": secret},
+        )
+        for _ in range(3)
+    ]
+
+    assert [r.status_code for r in responses[:2]] == [202, 202]
+    assert responses[2].status_code == 429
+    assert responses[2].json()["error"]["code"] == "rate_limited"

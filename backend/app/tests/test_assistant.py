@@ -4,6 +4,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.core.db import session_factory
 from app.core.redis import get_redis_client
 from app.main import app
@@ -244,3 +245,24 @@ async def test_assistant_does_not_leak_citations_across_tenants(client: TestClie
     events = _parse_sse_events(response.text)
     done = [e for e in events if e["type"] == "done"][0]
     assert done["citations"] == []
+
+
+@pytest.mark.asyncio
+async def test_assistant_query_rate_limited_per_user(client: TestClient, monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "assistant_rate_limit_max_requests", 2)
+    token, org_id = _register_login_and_create_org(client)
+    await _upload_and_ingest(client, token, org_id, b"Some document content.")
+
+    responses = [
+        client.post(
+            f"{ORGS_PREFIX}/{org_id}/assistant/query",
+            json={"query": "hi"},
+            headers=_auth_headers(token),
+        )
+        for _ in range(3)
+    ]
+
+    assert [r.status_code for r in responses[:2]] == [200, 200]
+    assert responses[2].status_code == 429
+    assert responses[2].json()["error"]["code"] == "rate_limited"

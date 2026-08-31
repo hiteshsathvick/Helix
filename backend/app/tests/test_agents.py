@@ -484,3 +484,26 @@ async def test_create_run_blocked_once_org_cost_cap_is_reached(client: TestClien
     )
     assert second.status_code == 402
     assert second.json()["error"]["code"] == "quota_exceeded"
+
+
+# --- per-user rate limit on starting a run (Phase 19, SPEC.md §29) ---
+
+
+def test_trigger_run_rate_limited_per_user(client: TestClient, monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "agent_run_rate_limit_max_requests", 2)
+    token, org_id = _register_login_and_create_org(client)
+    agent_id = _create_agent(client, token, org_id, [])
+
+    responses = [
+        client.post(
+            f"{ORGS_PREFIX}/{org_id}/agents/{agent_id}/runs",
+            json={"input": "hello"},
+            headers=_auth_headers(token),
+        )
+        for _ in range(3)
+    ]
+
+    assert [r.status_code for r in responses[:2]] == [202, 202]
+    assert responses[2].status_code == 429
+    assert responses[2].json()["error"]["code"] == "rate_limited"

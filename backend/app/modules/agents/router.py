@@ -3,7 +3,9 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import get_db
+from app.core.rate_limit import enforce_user_rate_limit
 from app.modules.agents import service
 from app.modules.agents.schemas import (
     AgentCreate,
@@ -53,6 +55,13 @@ async def trigger_run(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentRunSummary:
+    settings = get_settings()
+    await enforce_user_rate_limit(
+        current_user.id,
+        bucket="agent_run",
+        max_count=settings.agent_run_rate_limit_max_requests,
+        window_seconds=settings.agent_run_rate_limit_window_seconds,
+    )
     run = await service.create_run(db, org_id, current_user.id, agent_id, body.input)
     return AgentRunSummary.model_validate(run)
 

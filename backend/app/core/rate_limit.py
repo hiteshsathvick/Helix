@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import Request
 
 from app.core.config import get_settings
@@ -25,16 +27,17 @@ async def _enforce_fixed_window(
         raise RateLimitedError("too many attempts, try again later")
 
 
-async def enforce_rate_limit(request: Request, *, bucket: str) -> None:
+async def enforce_rate_limit(
+    request: Request, *, bucket: str, max_count: int, window_seconds: int
+) -> None:
     """Per client IP. Raises RateLimitedError (429) once the window's
-    attempt budget is exhausted."""
-    settings = get_settings()
+    attempt budget is exhausted. `max_count`/`window_seconds` are passed in
+    by the caller (rather than read from settings here) so this one helper
+    serves every IP-keyed surface -- auth attempts, inbound workflow
+    webhooks -- each with its own budget."""
     client_ip = request.client.host if request.client else "unknown"
     await _enforce_fixed_window(
-        client_ip,
-        bucket=bucket,
-        max_count=settings.auth_rate_limit_max_attempts,
-        window_seconds=settings.auth_rate_limit_window_seconds,
+        client_ip, bucket=bucket, max_count=max_count, window_seconds=window_seconds
     )
 
 
@@ -48,4 +51,17 @@ async def enforce_api_key_rate_limit(api_key_id: str) -> None:
         bucket="public_api",
         max_count=settings.public_api_rate_limit_max_requests,
         window_seconds=settings.public_api_rate_limit_window_seconds,
+    )
+
+
+async def enforce_user_rate_limit(
+    user_id: uuid.UUID, *, bucket: str, max_count: int, window_seconds: int
+) -> None:
+    """Per authenticated user (SPEC.md §29 "rate limits everywhere") --
+    independent of the per-IP and per-API-key limiters above. Covers
+    cost-bearing authenticated endpoints (assistant queries, agent runs,
+    workflow triggers) where the right identity to key on is the caller,
+    not their IP or an API key."""
+    await _enforce_fixed_window(
+        str(user_id), bucket=bucket, max_count=max_count, window_seconds=window_seconds
     )

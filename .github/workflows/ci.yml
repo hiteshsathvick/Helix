@@ -27,6 +27,48 @@ jobs:
       - run: npm run lint
         working-directory: frontend
 
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Scans backend[dev]'s resolved dependency set for known CVEs
+      # (SPEC.md §29/§33 "dependency + container scanning in CI"). Not
+      # combined into the lint job: a failure here is a different kind of
+      # signal (a vulnerable dependency, not a style/type issue) and
+      # shouldn't be masked by/mixed into lint output.
+      #
+      # Report-only (continue-on-error) for now, not a merge-blocking gate:
+      # a first run against this codebase already found several existing
+      # transitive-dependency CVEs where the only fix is a major-version
+      # bump (cryptography, pypdf, pytest, starlette, transformers) --
+      # each a real, separate piece of upgrade-and-regression-test work,
+      # not something to force through as a side effect of adding a scan
+      # step. Findings are tracked in docs/security/threat-model.md; fix
+      # them incrementally (Dependabot also opens PRs for these) rather
+      # than gating CI on pre-existing issues unrelated to a given PR's
+      # actual change. Revisit turning this blocking once the backlog is
+      # clear.
+      - run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
+      - run: pip install pip-audit
+      # --skip-editable: without it, pip-audit always errors on the
+      # project's own editable install ("helix-backend"), which isn't a
+      # real finding -- it has no PyPI presence to check versions against.
+      - run: pip-audit --skip-editable
+        continue-on-error: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+        continue-on-error: true
+
   type-check:
     runs-on: ubuntu-latest
     steps:
@@ -139,6 +181,25 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - run: docker build -f infra/docker/backend.Dockerfile -t helix-backend:ci .
       - run: docker build -f infra/docker/frontend.Dockerfile -t helix-frontend:ci .
+      # Scans the images just built, in this same job/runner (a fresh job
+      # wouldn't have them loaded in its Docker daemon). Report-only for
+      # now (continue-on-error), same reasoning as dependency-scan above --
+      # not yet run against these images, so severity is unknown; findings
+      # get triaged into docs/security/threat-model.md rather than
+      # silently blocking merges the first time this runs (SPEC.md §29/§33
+      # "container scanning in CI").
+      - uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: helix-backend:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+        continue-on-error: true
+      - uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: helix-frontend:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+        continue-on-error: true
 
   e2e:
     runs-on: ubuntu-latest

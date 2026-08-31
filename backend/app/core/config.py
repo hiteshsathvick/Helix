@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # turn — without this a long-running conversation's history would grow
     # its own (unbudgeted) token cost every single turn.
     assistant_max_history_messages: int = 10
+    # Per-user, independent of ai_default_monthly_cost_cap_usd: bounds
+    # request *rate*, not spend -- a caller within their cost cap can still
+    # hammer the endpoint (SPEC.md §29 "rate limits everywhere").
+    assistant_rate_limit_max_requests: int = 20
+    assistant_rate_limit_window_seconds: int = 60
 
     # Agent runtime guardrails (SPEC.md §19) — hard-enforced in code, not
     # just prompted. agent_max_run_cost_usd is a per-*run* ceiling (aborts a
@@ -79,6 +84,11 @@ class Settings(BaseSettings):
     # Default-deny (SPEC.md §29): empty means the http_request tool refuses
     # every host until explicit hostnames are added here.
     agent_http_allowlist: list[str] = []
+    # Per-user (SPEC.md §29 "rate limits everywhere") -- a run is already
+    # capped in cost/steps/time once started; this bounds how often a user
+    # can *start* one.
+    agent_run_rate_limit_max_requests: int = 20
+    agent_run_rate_limit_window_seconds: int = 60
 
     # Workflow engine guardrails (SPEC.md §20) -- hard-enforced in code, same
     # philosophy as the agent_* settings above. workflow_run_max_job_attempts
@@ -92,6 +102,14 @@ class Settings(BaseSettings):
     workflow_run_timeout_seconds: int = 600
     workflow_run_max_job_attempts: int = 3
     workflow_ai_node_max_tool_rounds: int = 4
+    # Manual triggers: per-user (SPEC.md §29). Webhook triggers: per client
+    # IP instead -- the caller is an unauthenticated external system
+    # identified only by a per-workflow secret, so IP is the only signal
+    # available, same reasoning as the auth endpoints' limiter.
+    workflow_trigger_rate_limit_max_requests: int = 30
+    workflow_trigger_rate_limit_window_seconds: int = 60
+    workflow_webhook_rate_limit_max_requests: int = 30
+    workflow_webhook_rate_limit_window_seconds: int = 60
 
     # Connector framework (SPEC.md §26). connector_encryption_key must be a
     # valid Fernet key (Fernet.generate_key(), base64-encoded 32 bytes) --

@@ -48,7 +48,13 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> AccessTokenResponse:
-    await enforce_rate_limit(request, bucket="login")
+    settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        bucket="login",
+        max_count=settings.auth_rate_limit_max_attempts,
+        window_seconds=settings.auth_rate_limit_window_seconds,
+    )
     user = await service.authenticate_user(db, body.email, body.password)
     refresh_token = await service.issue_refresh_token(db, user.id)
     # Only audited when the user already has an org to scope it to --

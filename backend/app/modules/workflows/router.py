@@ -1,10 +1,12 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.deps import get_db
+from app.core.rate_limit import enforce_rate_limit, enforce_user_rate_limit
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.orgs.dependencies import require_permission
@@ -112,6 +114,13 @@ async def trigger_run(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WorkflowRunSummary:
+    settings = get_settings()
+    await enforce_user_rate_limit(
+        current_user.id,
+        bucket="workflow_trigger",
+        max_count=settings.workflow_trigger_rate_limit_max_requests,
+        window_seconds=settings.workflow_trigger_rate_limit_window_seconds,
+    )
     run = await service.create_run(
         db,
         org_id,
@@ -169,9 +178,21 @@ async def trigger_via_webhook(
     org_id: uuid.UUID,
     workflow_id: uuid.UUID,
     body: dict[str, Any],
+    request: Request,
     x_webhook_secret: str = Header(...),
     db: AsyncSession = Depends(get_db),
 ) -> WorkflowRunSummary:
+    settings = get_settings()
+    # Per client IP, not per (org_id, workflow_id): the caller isn't
+    # authenticated yet at this point (that's what verify_webhook_secret
+    # below does) -- limiting first also blunts brute-forcing the secret
+    # itself, not just post-auth abuse.
+    await enforce_rate_limit(
+        request,
+        bucket="workflow_webhook",
+        max_count=settings.workflow_webhook_rate_limit_max_requests,
+        window_seconds=settings.workflow_webhook_rate_limit_window_seconds,
+    )
     await service.verify_webhook_secret(db, org_id, workflow_id, x_webhook_secret)
     run = await service.create_run(
         db, org_id, workflow_id, {"type": "webhook", "payload": body}, triggered_by_user_id=None

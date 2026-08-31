@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import session_factory
 from app.core.deps import get_db
+from app.core.rate_limit import enforce_user_rate_limit
 from app.modules.assistant import service
 from app.modules.assistant.schemas import (
     ConversationRead,
@@ -63,6 +65,13 @@ async def query_assistant(
     # raised from inside the generator instead, it would land after the
     # 200 status and headers are already sent, and couldn't be a clean 404
     # at all.
+    settings = get_settings()
+    await enforce_user_rate_limit(
+        current_user.id,
+        bucket="assistant_query",
+        max_count=settings.assistant_rate_limit_max_requests,
+        window_seconds=settings.assistant_rate_limit_window_seconds,
+    )
     conversation = await service.resolve_conversation(
         db, org_id, current_user.id, request.conversation_id, request.query
     )
