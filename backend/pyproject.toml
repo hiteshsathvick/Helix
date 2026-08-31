@@ -27,7 +27,7 @@ dependencies = [
     "openai>=1.50,<2",
     # Used directly by the agents module's http_request tool (SPEC.md §19),
     # not just transitively via anthropic/openai's own HTTP clients.
-    "httpx>=0.27,<0.28",
+    "httpx>=0.27,<0.29",
     # Authenticated symmetric encryption (Fernet) for connector OAuth tokens
     # at rest (SPEC.md §26) — core/security.py only has one-way hashing,
     # and a token must be decrypted to make API calls with it.
