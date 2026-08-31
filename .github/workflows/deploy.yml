@@ -12,9 +12,17 @@ name: Deploy
 # missing-secret dependency (ghcr.io + the repo's own GITHUB_TOKEN, both
 # always available) and will actually push real images. deploy-staging and
 # deploy-prod are real deploy logic, but every step that needs a real
-# Render/database credential is individually gated on
-# `if: secrets.X != ''` so the job reports a clean skip (not a failure)
-# until this repo's owner adds those secrets and flips it on for real.
+# Render/database credential is individually gated so the job reports a
+# clean skip (not a failure) until this repo's owner adds those secrets
+# and flips it on for real.
+#
+# The gate checks `env.X != ''`, not `secrets.X != ''` -- GitHub Actions'
+# workflow-schema validator rejects `secrets` as a named-value inside a
+# step's `if:` ("Unrecognized named-value: 'secrets'", confirmed by a real
+# failed run of this file: https://github.com/hiteshsathvick/Helix/actions/runs/33377784826),
+# even though `secrets.X` is fine inside a step's own `env:`/`run:` block.
+# Each job below maps its secrets into job-level `env:` once, then every
+# `if:` reads that env var instead.
 
 on:
   push:
@@ -68,6 +76,11 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      STAGING_MIGRATIONS_DATABASE_URL: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL }}
+      RENDER_STAGING_API_DEPLOY_HOOK: ${{ secrets.RENDER_STAGING_API_DEPLOY_HOOK }}
+      RENDER_STAGING_WORKER_DEPLOY_HOOK: ${{ secrets.RENDER_STAGING_WORKER_DEPLOY_HOOK }}
+      RENDER_STAGING_FRONTEND_DEPLOY_HOOK: ${{ secrets.RENDER_STAGING_FRONTEND_DEPLOY_HOOK }}
     steps:
       - uses: actions/checkout@v4
       # Migrations run before the new image is live, against the staging
@@ -75,27 +88,27 @@ jobs:
       # test job, just pointed at a real (not ephemeral) database. Skips
       # cleanly when the secret isn't set yet (Phase 22 scope: no live
       # cloud account exists to point this at).
-      - if: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL != '' }}
+      - if: ${{ env.STAGING_MIGRATIONS_DATABASE_URL != '' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - if: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL != '' }}
+      - if: ${{ env.STAGING_MIGRATIONS_DATABASE_URL != '' }}
         run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
-      - if: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL != '' }}
+      - if: ${{ env.STAGING_MIGRATIONS_DATABASE_URL != '' }}
         run: alembic upgrade head
         working-directory: backend
         env:
-          DATABASE_URL: ${{ secrets.STAGING_MIGRATIONS_DATABASE_URL }}
+          DATABASE_URL: ${{ env.STAGING_MIGRATIONS_DATABASE_URL }}
       # Render deploy hooks are a single POST URL per service (created once
       # a Render service exists, e.g. from infra/terraform/main.tf's
       # render_web_service.api) -- simplest possible trigger, no Render API
       # key or CLI needed for this step.
-      - if: ${{ secrets.RENDER_STAGING_API_DEPLOY_HOOK != '' }}
-        run: curl -fsS -X POST "${{ secrets.RENDER_STAGING_API_DEPLOY_HOOK }}"
-      - if: ${{ secrets.RENDER_STAGING_WORKER_DEPLOY_HOOK != '' }}
-        run: curl -fsS -X POST "${{ secrets.RENDER_STAGING_WORKER_DEPLOY_HOOK }}"
-      - if: ${{ secrets.RENDER_STAGING_FRONTEND_DEPLOY_HOOK != '' }}
-        run: curl -fsS -X POST "${{ secrets.RENDER_STAGING_FRONTEND_DEPLOY_HOOK }}"
+      - if: ${{ env.RENDER_STAGING_API_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ env.RENDER_STAGING_API_DEPLOY_HOOK }}"
+      - if: ${{ env.RENDER_STAGING_WORKER_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ env.RENDER_STAGING_WORKER_DEPLOY_HOOK }}"
+      - if: ${{ env.RENDER_STAGING_FRONTEND_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ env.RENDER_STAGING_FRONTEND_DEPLOY_HOOK }}"
 
   # Gated on the "production" GitHub Environment, which is where the DoD's
   # "prod deploy is one gated click" actually lives: a required reviewer
@@ -108,22 +121,27 @@ jobs:
     needs: deploy-staging
     runs-on: ubuntu-latest
     environment: production
+    env:
+      PROD_MIGRATIONS_DATABASE_URL: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL }}
+      RENDER_PROD_API_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_API_DEPLOY_HOOK }}
+      RENDER_PROD_WORKER_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_WORKER_DEPLOY_HOOK }}
+      RENDER_PROD_FRONTEND_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_FRONTEND_DEPLOY_HOOK }}
     steps:
       - uses: actions/checkout@v4
-      - if: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL != '' }}
+      - if: ${{ env.PROD_MIGRATIONS_DATABASE_URL != '' }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - if: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL != '' }}
+      - if: ${{ env.PROD_MIGRATIONS_DATABASE_URL != '' }}
         run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e "backend[dev]"
-      - if: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL != '' }}
+      - if: ${{ env.PROD_MIGRATIONS_DATABASE_URL != '' }}
         run: alembic upgrade head
         working-directory: backend
         env:
-          DATABASE_URL: ${{ secrets.PROD_MIGRATIONS_DATABASE_URL }}
-      - if: ${{ secrets.RENDER_PROD_API_DEPLOY_HOOK != '' }}
-        run: curl -fsS -X POST "${{ secrets.RENDER_PROD_API_DEPLOY_HOOK }}"
-      - if: ${{ secrets.RENDER_PROD_WORKER_DEPLOY_HOOK != '' }}
-        run: curl -fsS -X POST "${{ secrets.RENDER_PROD_WORKER_DEPLOY_HOOK }}"
-      - if: ${{ secrets.RENDER_PROD_FRONTEND_DEPLOY_HOOK != '' }}
-        run: curl -fsS -X POST "${{ secrets.RENDER_PROD_FRONTEND_DEPLOY_HOOK }}"
+          DATABASE_URL: ${{ env.PROD_MIGRATIONS_DATABASE_URL }}
+      - if: ${{ env.RENDER_PROD_API_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ env.RENDER_PROD_API_DEPLOY_HOOK }}"
+      - if: ${{ env.RENDER_PROD_WORKER_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ env.RENDER_PROD_WORKER_DEPLOY_HOOK }}"
+      - if: ${{ env.RENDER_PROD_FRONTEND_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ env.RENDER_PROD_FRONTEND_DEPLOY_HOOK }}"
