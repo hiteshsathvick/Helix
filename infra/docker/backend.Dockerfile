@@ -1,6 +1,6 @@
 # Single image, two entrypoints (api / worker) — see app/main.py and app/workers/run.py
 
-FROM python:3.12-slim AS base
+FROM python:3.15-slim AS base
 
 WORKDIR /srv
 
